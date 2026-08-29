@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.goodmorning.alarm.data.prefs.SettingsRepository
@@ -40,6 +41,16 @@ class RingingViewModel(application: Application) : AndroidViewModel(application)
 
     /** 播放/暂停切换 */
     fun togglePlayPause() = sendCommand(Constants.ACTION_PLAY_PAUSE)
+
+    /**
+     * 清理残留的响铃通知（页面超时退出时调用）：
+     * 服务已死时 FSI/兜底通知仍会滞留，不清除会被反复点进死页面。
+     */
+    fun cancelStaleNotification() {
+        runCatching {
+            NotificationManagerCompat.from(getApplication()).cancel(Constants.NOTIF_ID_RINGING)
+        }
+    }
 
     /**
      * 打开抖音 App 直达博主主页（方案 A：数据源不可靠时的兜底入口）。

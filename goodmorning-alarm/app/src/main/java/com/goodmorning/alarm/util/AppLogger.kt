@@ -32,23 +32,14 @@ object AppLogger {
     fun e(tag: String, message: String, tr: Throwable? = null) = write("E", tag, message, tr)
 
     private fun write(level: String, tag: String, message: String, tr: Throwable?) {
-        // Logcat 始终输出
         when (level) {
             "E" -> Log.e(tag, message, tr)
             "W" -> Log.w(tag, message, tr)
             "I" -> Log.i(tag, message)
             else -> Log.d(tag, message)
         }
-        // 文件日志异步落盘
         val appContext = appContext ?: return
-        val line = buildString {
-            append(timestamp()).append(' ').append(level).append('/').append(tag).append(": ")
-            append(message)
-            if (tr != null) {
-                append(" | ").append(tr.javaClass.simpleName)
-                tr.message?.let { append(": ").append(it) }
-            }
-        }
+        val line = buildLine(level, tag, message, tr)
         executor.execute {
             try {
                 writeLine(appContext, line)
@@ -58,6 +49,29 @@ object AppLogger {
             }
         }
     }
+
+    /**
+     * 崩溃路径专用：同步写 ERROR 日志（阻塞直至落盘）。
+     * 默认 UncaughtExceptionHandler 随后即杀死进程，异步队列来不及执行，
+     * 崩溃堆栈必须在此线程直接写文件。
+     */
+    fun eSync(tag: String, message: String, tr: Throwable?) {
+        Log.e(tag, message, tr)
+        val appContext = appContext ?: return
+        runCatching { writeLine(appContext, buildLine("E", tag, message, tr)) }
+    }
+
+    private fun buildLine(level: String, tag: String, message: String, tr: Throwable?): String =
+        buildString {
+            append(timestamp()).append(' ').append(level).append('/').append(tag).append(": ")
+            append(message)
+            if (tr != null) {
+                append(" | ").append(tr.javaClass.name)
+                tr.message?.let { append(": ").append(it) }
+                appendLine()
+                append(Log.getStackTraceString(tr))
+            }
+        }
 
     private fun timestamp(): String = synchronized(logFormat) { logFormat.format(Date()) }
 

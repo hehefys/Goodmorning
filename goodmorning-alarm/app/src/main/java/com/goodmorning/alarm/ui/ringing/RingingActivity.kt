@@ -123,20 +123,25 @@ private fun RingingScreen(
     // F3 ②：启动 3 秒后状态仍为 null（服务协程未就绪/服务被拦截）时显示“闹钟加载中”占位
     var showLoading by remember { mutableStateOf(false) }
 
-    // F3 ①：最小展示时长保护 —— 页面启动 3 秒内即使状态为 null 也绝不关闭，
-    // 防止服务协程未就绪 / 短促结束（如坏文件立即 STATE_ENDED）时页面被误关（“闪一下回桌面”）。
-    // 仅当“先见过非 null 状态、随后变 null”（服务真正停止）且已过 3 秒才关闭。
+    // 修复：覆盖全部退出路径，页面绝不永久卡死 ——
+    // ① 见过响铃后状态变 null（服务停止）：补满 3 秒最小展示后必然关闭。
+    //    旧实现只在“新发射到达”时判断，3 秒内停止/贪睡时 null 那次发射被忽略，
+    //    StateFlow 此后不再发射 → 页面永久卡在加载占位且返回键禁用。
+    // ② 状态从未到达（服务被系统拦截/已停止后点通知进入）：10 秒超时自动关闭，
+    //    同时清掉残留响铃通知，避免反复点进死页面。
     LaunchedEffect(Unit) {
-        val minDisplayMillis = 3_000L
         val startElapsed = SystemClock.elapsedRealtime()
         var seenRinging = false
         viewModel.state.collect { current ->
             if (current != null) {
                 seenRinging = true
                 showLoading = false
-            } else if (seenRinging &&
-                SystemClock.elapsedRealtime() - startElapsed >= minDisplayMillis
-            ) {
+            } else if (seenRinging) {
+                val remainMs = 3_000L - (SystemClock.elapsedRealtime() - startElapsed)
+                if (remainMs > 0) delay(remainMs)
+                onFinished()
+            } else if (SystemClock.elapsedRealtime() - startElapsed >= 10_000L) {
+                viewModel.cancelStaleNotification()
                 onFinished()
             }
         }

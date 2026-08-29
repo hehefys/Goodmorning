@@ -23,6 +23,7 @@ import com.goodmorning.alarm.alarm.AlarmScheduler
 import com.goodmorning.alarm.alarm.SelectionPolicy
 import com.goodmorning.alarm.data.prefs.SettingsRepository
 import com.goodmorning.alarm.data.repo.VideoRepository
+import com.goodmorning.alarm.sync.SyncEngine
 import com.goodmorning.alarm.sync.SyncScheduler
 import com.goodmorning.alarm.ui.ringing.RingingActivity
 import com.goodmorning.alarm.util.AppLogger
@@ -38,6 +39,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -163,6 +165,14 @@ class AlarmService : Service() {
             try {
                 val settings = settingsRepository.current()
                 val today = TimeUtils.localDate()
+                // 响铃现场限时快速同步：定时同步（05:30/21:00）被系统杀掉或失败时，
+                // 这里仍有机会拿到当天最新音频；超时/失败不阻塞，继续走本地缓存兜底。
+                val synced = withTimeoutOrNull(RING_SYNC_TIMEOUT_MS) {
+                    runCatching { SyncEngine(this@AlarmService).sync() }.getOrNull()
+                }
+                if (synced == null) {
+                    AppLogger.w(TAG, "响铃前快速同步未完成（≤${RING_SYNC_TIMEOUT_MS}ms），走本地缓存")
+                }
                 val videos = repository.playableVideos()
                 val result = selectionPolicy.select(videos, today)
 
@@ -416,6 +426,9 @@ class AlarmService : Service() {
         private const val TAG = Constants.TAG_PREFIX + "Service"
         private const val REQUEST_CODE_FULLSCREEN = 3001
         private const val REQUEST_CODE_STOP = 3002
+
+        /** 响铃现场快速同步上限：超时即放弃网络、走本地缓存（响铃不能久等） */
+        private const val RING_SYNC_TIMEOUT_MS = 6_000L
 
         /** 响铃状态（Service 写、响铃页读；null = 未在响铃） */
         private val _ringingState = MutableStateFlow<RingingState?>(null)

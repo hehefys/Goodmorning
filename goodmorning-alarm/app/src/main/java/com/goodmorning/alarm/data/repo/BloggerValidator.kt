@@ -83,8 +83,8 @@ class BloggerValidator(context: Context) {
     companion object {
         private const val TAG = Constants.TAG_PREFIX + "Blogger"
 
-        /** 主页链接中提取 sec_uid：user/([A-Za-z0-9_-]+) */
-        private val USER_LINK_REGEX = Regex("user/([A-Za-z0-9_-]+)")
+        /** 主页链接中提取 sec_uid：捕获 user/ 到下一个 / ? # 的完整段 */
+        private val USER_LINK_REGEX = Regex("user/([^/?#]+)")
 
         /** 纯 sec_uid：长度 ≥ 20 的字母数字下划线连字符串 */
         private val PURE_SEC_UID_REGEX = Regex("^[A-Za-z0-9_-]{20,}$")
@@ -99,7 +99,12 @@ class BloggerValidator(context: Context) {
             val text = input.trim()
             if (text.isEmpty()) return null
             if (text.contains("douyin.com/user/")) {
-                USER_LINK_REGEX.find(text)?.let { return it.groupValues[1] }
+                USER_LINK_REGEX.find(text)?.let { match ->
+                    // 整段校验：截出的段必须是合法 sec_uid 形态，
+                    // 防止 "user/not.valid.uid!!" 被截成 "not" 当博主
+                    val candidate = match.groupValues[1]
+                    if (PURE_SEC_UID_REGEX.matches(candidate)) return candidate
+                }
             }
             return if (PURE_SEC_UID_REGEX.matches(text)) text else null
         }

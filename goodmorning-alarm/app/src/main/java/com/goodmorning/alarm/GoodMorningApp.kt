@@ -28,8 +28,28 @@ class GoodMorningApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppLogger.init(this)
+        installCrashLogger()
         createNotificationChannels()
         startupSelfCheck()
+    }
+
+    /**
+     * 全局崩溃落盘：任何未捕获异常先同步写入文件日志再交给系统默认处理。
+     * 「进程还在但界面反复闪退」类问题（前台服务保活进程、Activity 层崩溃循环）
+     * 此前无堆栈可查，落盘后从 filesDir/logs/ 即可定位。
+     */
+    private fun installCrashLogger() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                AppLogger.eSync(
+                    Constants.TAG_PREFIX + "Crash",
+                    "未捕获异常 thread=${thread.name}",
+                    throwable
+                )
+            }
+            previous?.uncaughtException(thread, throwable)
+        }
     }
 
     /** 创建通知渠道（Android 8+ 必须；低于该版本直接忽略） */
