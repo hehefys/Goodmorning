@@ -1,0 +1,70 @@
+classDiagram
+    class AlarmScheduler {
+        +scheduleNextDaily(hour: Int, minute: Int)
+        +scheduleSnooze(minutes: Int)
+        +cancel()
+        +canScheduleExact(): Boolean
+    }
+    class AlarmReceiver
+    class BootReceiver
+    class AlarmService {
+        +onStartCommand(intent, flags, startId): Int
+        -selectAndPlay()
+        -handleStop()
+        -handleSnooze()
+        -rescheduleTomorrow()
+    }
+    class AlarmPlayer {
+        +play(file: File, fade: Boolean)
+        +pause() +resume() +stop()
+        +onError: ((Throwable) -> Unit)?
+    }
+    class SelectionPolicy {
+        +select(videos: List~VideoEntity~, today: String): SelectionResult
+    }
+    class SelectionResult {
+        +video: VideoEntity?
+        +source: Source
+    }
+    class SyncEngine {
+        +sync(): SyncResult
+        -fetchAndParse(): List~VideoItem~
+        -downloadMissing(items: List~VideoItem~)
+    }
+    class SyncWorker
+    class SyncScheduler {
+        +scheduleNext(context: Context)
+    }
+    class RssFeedParser {
+        +parse(json: String): List~VideoItem~
+    }
+    class VideoDownloader {
+        +download(url: String, dest: File): File
+    }
+    class VideoDao
+    class SettingsRepository {
+        +settings: Flow~Settings~
+        +suspend setAlarmTime(h, m)
+        +suspend setRssBaseUrl(url)
+        +suspend setSnoozeMinutes(n)
+    }
+    class VideoRepository {
+        +cachedVideos(): Flow~List~VideoEntity~~
+        +suspend latestDownloadedOn(date): VideoEntity?
+        +suspend logPlayback(entry)
+    }
+
+    AlarmService --> SelectionPolicy : 选片
+    AlarmService --> AlarmPlayer : 播放控制
+    AlarmService --> VideoRepository : 读缓存/记历史
+    AlarmService --> AlarmScheduler : 响后注册次日
+    AlarmScheduler ..> AlarmReceiver : PendingIntent 触发
+    AlarmReceiver ..> AlarmService : startForegroundService
+    BootReceiver --> AlarmScheduler : 重注册
+    BootReceiver --> SyncScheduler : 补调度
+    SyncWorker --> SyncEngine : 执行
+    SyncEngine --> RssFeedParser : 解析
+    SyncEngine --> VideoDownloader : 下载
+    SyncEngine --> VideoDao : upsert
+    SyncEngine --> SettingsRepository : 读写同步状态
+    SyncScheduler ..> SyncWorker : enqueue 下一个 05:30/21:00

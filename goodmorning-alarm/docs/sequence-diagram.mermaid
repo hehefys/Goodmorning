@@ -1,0 +1,62 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant MS as MainScreen/VM
+    participant AS as AlarmScheduler
+    participant AM as AlarmManager
+    participant SS as SyncScheduler
+    participant W as SyncWorker
+    participant SE as SyncEngine
+    participant RP as RssFeedParser
+    participant VD as VideoDownloader
+    participant DB as Room(VideoDao)
+    participant AR as AlarmReceiver
+    participant SVC as AlarmService
+    participant SP as SelectionPolicy
+    participant PL as AlarmPlayer
+    participant RA as RingingActivity
+
+    Note over U,AS: ① 设定闹钟
+    U->>MS: 选时间 07:00 并开启
+    MS->>AS: scheduleNextDaily(7,0)
+    AS->>AM: setExactAndAllowWhileIdle(明天07:00)
+    AS-->>MS: 注册成功(校验 canScheduleExactAlarms)
+
+    Note over SS,SE: ② 定时同步（每天 05:30 / 21:00，OneTimeWork 自续期）
+    SS->>W: enqueue(下一个 05:30 或 21:00)
+    W->>SE: sync()
+    SE->>RP: 拉取 {base}/douyin/user/{secUid}?embed=1&format=json
+    RP-->>SE: List<VideoItem>(含直链)
+    SE->>DB: upsertAll(元数据)
+    SE->>VD: 下载最新 3 条(UA+Referer+302)
+    VD-->>SE: 本地路径(.part→rename)
+    SE->>DB: 更新 localPath / 清理旧缓存
+    W->>SS: scheduleNext(下一时刻)
+    Note over SE: 失败→静默记日志/状态，不影响响铃
+
+    Note over AR,RA: ③ 到点响铃
+    AM->>AR: onReceive(明天07:00)
+    AR->>SVC: startForegroundService(ACTION_RING)
+    SVC->>SVC: 启动前台通知(full-screen intent)
+    SVC->>SP: select(videos, 今天 yyyy-MM-dd)
+    alt 规则① 存在今日视频
+        SP-->>SVC: SelectionResult(video, TODAY)
+    else 规则② 播最近一期
+        SP-->>SVC: SelectionResult(video, CACHED)
+    else 规则③ 无任何可用缓存
+        SP-->>SVC: SelectionResult(null, FALLBACK)
+    end
+    SVC->>PL: play(本地mp4 / 内置铃声, 音量渐强30%→100%/20s)
+    SVC->>RA: full-screen intent 拉起响铃页
+    RA-->>U: 大字时间+标题+日期(+未更新提示条)
+    U->>RA: 点「停止」
+    RA->>SVC: ACTION_STOP
+    SVC->>PL: stop()
+    SVC->>AS: scheduleNextDaily(明天07:00)
+    SVC->>SS: scheduleNext(补调度同步,冗余)
+    SVC->>SVC: stopSelf()
+
+    Note over SVC,PL: ④ 播放中降级（P0-4 绝不哑火）
+    PL-->>SVC: onError(文件损坏/无本地文件)
+    SVC->>PL: play(res/raw/fallback_ringtone.mp3)
+    SVC->>SVC: AppLogger 记录降级原因
