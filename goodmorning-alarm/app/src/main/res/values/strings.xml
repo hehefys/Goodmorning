@@ -65,7 +65,8 @@
     <string name="ambient_base_volume">背景音量</string>
     <string name="ambient_duck_volume">视频播放时压低至</string>
     <string name="ambient_lead_label">衬托时长</string>
-    <string name="ambient_lead_fmt">%1$d 秒</string>
+    <string name="ambient_lead_sec_fmt">%1$d 秒</string>
+    <string name="ambient_lead_min_fmt">%1$d 分 %2$d 秒</string>
     <string name="ambient_pick_failed">无法读取所选文件，请换一个音频文件</string>
 
     <!-- ===== 使用说明页（DESIGN-V2 §4，§2.4 表格顺序） ===== -->

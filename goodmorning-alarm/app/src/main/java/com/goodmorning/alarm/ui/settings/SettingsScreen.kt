@@ -428,27 +428,36 @@ fun SettingsScreen(
                         valueRange = 0f..100f
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.ambient_lead_label),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Ink60
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_OPTIONS.forEach { seconds ->
-                            FilterChip(
-                                selected = uiState.settings.ambientLeadSeconds == seconds,
-                                onClick = { viewModel.setAmbientLeadSeconds(seconds) },
-                                label = {
-                                    Text(
-                                        text = stringResource(
-                                            R.string.ambient_lead_fmt, seconds
-                                        )
-                                    )
-                                }
-                            )
-                        }
+                    val leadSeconds = uiState.settings.ambientLeadSeconds
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.ambient_lead_label),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Ink60
+                        )
+                        Text(
+                            text = if (leadSeconds >= 60) {
+                                stringResource(
+                                    R.string.ambient_lead_min_fmt,
+                                    leadSeconds / 60, leadSeconds % 60
+                                )
+                            } else {
+                                stringResource(R.string.ambient_lead_sec_fmt, leadSeconds)
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Ink60
+                        )
                     }
+                    Slider(
+                        value = leadSeconds.toFloat(),
+                        onValueChange = { viewModel.setAmbientLeadSeconds(it.toInt()) },
+                        valueRange = com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MIN.toFloat()..
+                            com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MAX.toFloat()
+                    )
                 }
             }
 

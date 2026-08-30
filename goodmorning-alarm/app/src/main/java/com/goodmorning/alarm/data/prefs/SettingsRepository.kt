@@ -132,8 +132,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAmbientLeadSeconds(seconds: Int) {
         context.dataStore.edit {
-            it[Keys.AMBIENT_LEAD_SECONDS] =
-                if (seconds in Constants.AMBIENT_LEAD_OPTIONS) seconds else Constants.AMBIENT_LEAD_DEFAULT
+            it[Keys.AMBIENT_LEAD_SECONDS] = seconds.coerceIn(
+                Constants.AMBIENT_LEAD_MIN, Constants.AMBIENT_LEAD_MAX
+            )
         }
     }
 
