@@ -80,7 +80,7 @@ class AlarmService : Service() {
         super.onCreate()
         player = AlarmPlayer(this).apply {
             onError = { throwable -> onPlayerError(throwable) }
-            onEnded = { handleStop() }
+            onEnded = { onMainEnded() }
         }
     }
 
@@ -142,9 +142,19 @@ class AlarmService : Service() {
                 val video = result.video
                 val localPath = video?.localPath
                 if (video != null && !localPath.isNullOrBlank() && File(localPath).isFile) {
+                    // 副音频衬托期：先循环背景音乐，衬托结束再起播视频音频（两轨并行，无需对时）
+                    if (settings.ambientEnabled && settings.ambientUri.isNotBlank()) {
+                        player.startAmbient(Uri.parse(settings.ambientUri), settings.ambientVolume / 100f)
+                        delay(settings.ambientLeadSeconds * 1000L)
+                        // 衬托期间用户可能已停止/贪睡：卫兵已复位则本场作废
+                        if (!ringingGuard.get()) return@launch
+                    }
                     currentPlayingPath = localPath
                     ringtoneAttempted = false
                     player.playFile(File(localPath), settings.volumeFadeEnabled)
+                    if (player.isAmbientPlaying) {
+                        player.duckAmbient(settings.ambientDuckedVolume / 100f)
+                    }
                     updateNotificationContent(
                         title = video.title.ifBlank { getString(R.string.notif_ring_title) },
                         text = getString(R.string.ringing_publish_date_fmt, video.publishDate)
@@ -221,12 +231,33 @@ class AlarmService : Service() {
         playFallback("播放器错误：${throwable.message}")
     }
 
+    /**
+     * 主音频自然播完：
+     * 有副音频 → 恢复音量续播收尾段（AMBIENT_WRAP_UP_MS）后停止；
+     * 无副音频 → 立即收场（原行为）。
+     */
+    private fun onMainEnded() {
+        if (!player.isAmbientPlaying) {
+            handleStop()
+            return
+        }
+        serviceScope.launch {
+            runCatching {
+                val settings = settingsRepository.current()
+                player.restoreAmbient(settings.ambientVolume / 100f)
+            }
+            delay(Constants.AMBIENT_WRAP_UP_MS)
+            handleStop()
+        }
+    }
+
     // ---- 控制命令 ----
 
-    /** 停止本次响铃：停播、撤通知、注册明天闹钟、补调度同步 */
+    /** 停止本次响铃：停播（含副音频）、撤通知、注册明天闹钟、补调度同步 */
     private fun handleStop() {
         stopToneFallback()
         player.stop()
+        player.stopAmbient()
         ringingGuard.set(false)
         ringtoneAttempted = false
         currentPlayingPath = null
@@ -242,10 +273,11 @@ class AlarmService : Service() {
         }
     }
 
-    /** 贪睡：停播、撤通知、N 分钟后一次性精确闹钟重跑完整流程 */
+    /** 贪睡：停播（含副音频）、撤通知、N 分钟后一次性精确闹钟重跑完整流程 */
     private fun handleSnooze() {
         stopToneFallback()
         player.stop()
+        player.stopAmbient()
         ringingGuard.set(false)
         currentPlayingPath = null
         serviceScope.launch {

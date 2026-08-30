@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -348,6 +349,106 @@ fun SettingsScreen(
                         checked = uiState.settings.volumeFadeEnabled,
                         onCheckedChange = { viewModel.setVolumeFadeEnabled(it) }
                     )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 条目 3：副音频衬托（开关 + 选文件 + 双音量 + 衬托时长）
+                val ambientPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+                ) { uri -> uri?.let(viewModel::onAmbientPicked) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.ambient_label),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Ink900
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.ambient_help),
+                            style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
+                            color = Ink60
+                        )
+                    }
+                    Switch(
+                        checked = uiState.settings.ambientEnabled,
+                        onCheckedChange = { viewModel.setAmbientEnabled(it) }
+                    )
+                }
+                if (uiState.settings.ambientEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (uiState.settings.ambientName.isBlank()) {
+                                stringResource(R.string.ambient_none)
+                            } else {
+                                stringResource(
+                                    R.string.ambient_picked_fmt, uiState.settings.ambientName
+                                )
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Ink900,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                ambientPicker.launch(arrayOf("audio/*"))
+                            },
+                            shape = ShapeMedium
+                        ) {
+                            Text(text = stringResource(R.string.ambient_pick))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.ambient_base_volume),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Ink60
+                    )
+                    Slider(
+                        value = uiState.settings.ambientVolume.toFloat(),
+                        onValueChange = { viewModel.setAmbientVolume(it.toInt()) },
+                        valueRange = 0f..100f
+                    )
+                    Text(
+                        text = stringResource(R.string.ambient_duck_volume),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Ink60
+                    )
+                    Slider(
+                        value = uiState.settings.ambientDuckedVolume.toFloat(),
+                        onValueChange = { viewModel.setAmbientDuckedVolume(it.toInt()) },
+                        valueRange = 0f..100f
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.ambient_lead_label),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Ink60
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_OPTIONS.forEach { seconds ->
+                            FilterChip(
+                                selected = uiState.settings.ambientLeadSeconds == seconds,
+                                onClick = { viewModel.setAmbientLeadSeconds(seconds) },
+                                label = {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.ambient_lead_fmt, seconds
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
             }
 

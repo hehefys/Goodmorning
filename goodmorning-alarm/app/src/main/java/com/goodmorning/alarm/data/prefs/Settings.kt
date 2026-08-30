@@ -23,6 +23,18 @@ data class Settings(
     val snoozeMinutes: Int = Constants.SNOOZE_DEFAULT,
     /** 音量渐强开关（默认开） */
     val volumeFadeEnabled: Boolean = true,
+    /** 副音频衬托开关（默认关）：闹钟开始先循环副音频，衬托结束起播视频音频 */
+    val ambientEnabled: Boolean = false,
+    /** 副音频文件 URI（SAF 持久授权；空 = 未选择） */
+    val ambientUri: String = "",
+    /** 副音频文件名（仅展示用） */
+    val ambientName: String = "",
+    /** 副音频基础音量 0-100 */
+    val ambientVolume: Int = 30,
+    /** 视频音频播放期间副音频压低到的音量 0-100 */
+    val ambientDuckedVolume: Int = 10,
+    /** 视频音频起播前的衬托时长（秒，可选 60/120/180） */
+    val ambientLeadSeconds: Int = Constants.AMBIENT_LEAD_DEFAULT,
     /** 最近同步时间（展示文本 MM-dd HH:mm；空 = 从未同步） */
     val lastSyncAt: String = "",
     /** 最近同步是否成功（部分成功也算成功） */

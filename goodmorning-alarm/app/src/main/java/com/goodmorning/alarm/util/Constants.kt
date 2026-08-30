@@ -41,6 +41,16 @@ object Constants {
     const val FADE_DURATION_MS = 20_000L
     const val FADE_STEP_MS = 500L
 
+    // ===== 副音频衬托 =====
+    /** 衬托时长可选项（秒） */
+    val AMBIENT_LEAD_OPTIONS: List<Int> = listOf(60, 120, 180)
+    /** 默认衬托时长（秒） */
+    const val AMBIENT_LEAD_DEFAULT = 120
+    /** 副音频压低/恢复渐变时长 */
+    const val AMBIENT_FADE_MS = 3_000L
+    /** 视频音频播完后，副音频恢复续播的收尾时长 */
+    const val AMBIENT_WRAP_UP_MS = 30_000L
+
     // ===== 第四级兜底：ToneGenerator 蜂鸣（无任何可用铃声 URI 时） =====
     /** ToneGenerator 音量（0-100） */
     const val TONE_VOLUME = 80

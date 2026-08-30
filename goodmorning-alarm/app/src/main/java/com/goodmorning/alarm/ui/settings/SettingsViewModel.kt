@@ -1,6 +1,7 @@
 package com.goodmorning.alarm.ui.settings
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.goodmorning.alarm.R
@@ -131,6 +132,56 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             settingsRepository.setVolumeFadeEnabled(enabled)
         }
+    }
+
+    // ---- 副音频衬托 ----
+
+    fun setAmbientEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setAmbientEnabled(enabled) }
+    }
+
+    /**
+     * 用户从 SAF 选中副音频：持久化读权限（重启后仍可访问），
+     * 查询文件名一起入库；授权失败（极少数提供方）则不保存并提示。
+     */
+    fun onAmbientPicked(uri: Uri) {
+        val app = getApplication<Application>()
+        runCatching {
+            app.contentResolver.takePersistableUriPermission(
+                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }.onFailure {
+            toastMessage.value = app.getString(R.string.ambient_pick_failed)
+            return
+        }
+        viewModelScope.launch {
+            val name = withContext(Dispatchers.IO) { queryDisplayName(app, uri) }
+            settingsRepository.setAmbientSource(uri.toString(), name)
+        }
+    }
+
+    fun setAmbientVolume(volume: Int) {
+        viewModelScope.launch { settingsRepository.setAmbientVolume(volume) }
+    }
+
+    fun setAmbientDuckedVolume(volume: Int) {
+        viewModelScope.launch { settingsRepository.setAmbientDuckedVolume(volume) }
+    }
+
+    fun setAmbientLeadSeconds(seconds: Int) {
+        viewModelScope.launch { settingsRepository.setAmbientLeadSeconds(seconds) }
+    }
+
+    /** 查询 content uri 的展示名（失败回退 uri 尾段） */
+    private fun queryDisplayName(context: Application, uri: Uri): String {
+        return runCatching {
+            context.contentResolver.query(
+                uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+            )?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment.orEmpty()
     }
 
     // ---- 立即同步 / 缓存（逻辑不变） ----

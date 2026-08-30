@@ -33,7 +33,7 @@ import java.io.File
  *   保证任何暂停/恢复序列下最终音量必然达到 100%（E1）；
  * - 播放错误回调由 AlarmService 触发兜底降级（P0-4 绝不哑火）。
  */
-class AlarmPlayer(context: Context) {
+class AlarmPlayer(private val context: Context) {
 
     /** 播放错误（文件损坏/解码失败等），由外部触发兜底降级 */
     var onError: ((Throwable) -> Unit)? = null
@@ -78,23 +78,81 @@ class AlarmPlayer(context: Context) {
         }
     }
 
+    /** 闹钟音频属性（主/副播放器共用；USAGE_ALARM 通道）。
+     *  handleAudioFocus 必须为 false：Media3 仅允许 MEDIA/GAME 自动管焦点，
+     *  USAGE_ALARM + true 会抛 IllegalArgumentException 使服务创建即崩（真机日志实锤）。 */
+    private val alarmAttributes = AudioAttributes.Builder()
+        .setUsage(C.USAGE_ALARM)
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .build()
+
     private val player: ExoPlayer = ExoPlayer.Builder(context)
         .setTrackSelector(trackSelector)
         .setWakeMode(C.WAKE_MODE_LOCAL)
-        .setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(C.USAGE_ALARM)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build(),
-            /* handleAudioFocus = */
-            // 必须 false：Media3 的自动焦点管理只允许 USAGE_MEDIA/GAME，
-            // USAGE_ALARM + true 会直接抛 IllegalArgumentException 导致服务创建崩溃
-            false
-        )
+        .setAudioAttributes(alarmAttributes, /* handleAudioFocus = */ false)
         .build()
         .also { it.addListener(playerListener) }
 
     private var fadeJob: Job? = null
+
+    // ---- 副音频轨（循环陪衬，主音频播放期间自动压低） ----
+
+    private var ambientPlayer: ExoPlayer? = null
+    private var ambientFadeJob: Job? = null
+
+    /** 副音频是否正在循环播放 */
+    val isAmbientPlaying: Boolean get() = ambientPlayer?.isPlaying == true
+
+    /** 启动副音频循环（重复调用会先释放旧实例） */
+    fun startAmbient(uri: Uri, baseVolume: Float) {
+        stopAmbient()
+        val p = ExoPlayer.Builder(context).build()
+        p.setAudioAttributes(alarmAttributes, /* handleAudioFocus = */ false)
+        p.repeatMode = Player.REPEAT_MODE_ONE
+        p.volume = baseVolume.coerceIn(0f, 1f)
+        p.setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+        p.prepare()
+        p.play()
+        ambientPlayer = p
+        AppLogger.i(TAG, "副音频已启动（音量 ${(baseVolume * 100).toInt()}%）")
+    }
+
+    /** 主音频起播：副音频渐变压低 */
+    fun duckAmbient(duckedVolume: Float) {
+        fadeAmbientTo(duckedVolume.coerceIn(0f, 1f))
+        AppLogger.i(TAG, "副音频压低至 ${(duckedVolume * 100).toInt()}%")
+    }
+
+    /** 主音频播完：副音频渐变恢复 */
+    fun restoreAmbient(baseVolume: Float) {
+        fadeAmbientTo(baseVolume.coerceIn(0f, 1f))
+        AppLogger.i(TAG, "副音频恢复至 ${(baseVolume * 100).toInt()}%")
+    }
+
+    /** 停止并释放副音频 */
+    fun stopAmbient() {
+        ambientFadeJob?.cancel()
+        ambientFadeJob = null
+        ambientPlayer?.let { p -> runCatching { p.stop(); p.release() } }
+        ambientPlayer = null
+    }
+
+    /** 副音频音量线性渐变（AMBIENT_FADE_MS 内到位） */
+    private fun fadeAmbientTo(target: Float) {
+        val p = ambientPlayer ?: return
+        ambientFadeJob?.cancel()
+        ambientFadeJob = scope.launch {
+            val from = p.volume
+            val steps = (Constants.AMBIENT_FADE_MS / 100L).coerceAtLeast(1)
+            val increment = (target - from) / steps
+            repeat(steps.toInt()) {
+                if (!isActive) return@launch
+                p.volume = (p.volume + increment).coerceIn(0f, 1f)
+                delay(100)
+            }
+            p.volume = target
+        }
+    }
 
     /**
      * 渐强窗口描述：从起播时刻（elapsedRealtime）起的 FADE_DURATION_MS 时长。
@@ -138,6 +196,7 @@ class AlarmPlayer(context: Context) {
         fadeJob?.cancel()
         fadeWindow = null
         scope.cancel()
+        stopAmbient()
         player.removeListener(playerListener)
         player.release()
     }

@@ -30,6 +30,14 @@ class SettingsRepository(private val context: Context) {
         val RSSHUB_BASE_URL = stringPreferencesKey("rsshub_base_url")
         val SNOOZE_MINUTES = intPreferencesKey("snooze_minutes")
         val VOLUME_FADE_ENABLED = booleanPreferencesKey("volume_fade_enabled")
+
+        // ---- 副音频衬托 ----
+        val AMBIENT_ENABLED = booleanPreferencesKey("ambient_enabled")
+        val AMBIENT_URI = stringPreferencesKey("ambient_uri")
+        val AMBIENT_NAME = stringPreferencesKey("ambient_name")
+        val AMBIENT_VOLUME = intPreferencesKey("ambient_volume")
+        val AMBIENT_DUCKED_VOLUME = intPreferencesKey("ambient_ducked_volume")
+        val AMBIENT_LEAD_SECONDS = intPreferencesKey("ambient_lead_seconds")
         val LAST_SYNC_AT = stringPreferencesKey("last_sync_at")
         val LAST_SYNC_OK = booleanPreferencesKey("last_sync_ok")
         val LAST_SYNC_MSG = stringPreferencesKey("last_sync_msg")
@@ -54,6 +62,12 @@ class SettingsRepository(private val context: Context) {
             bloggerName = prefs[Keys.BLOGGER_NAME] ?: Settings.DEFAULT_BLOGGER_NAME,
             snoozeMinutes = prefs[Keys.SNOOZE_MINUTES] ?: Constants.SNOOZE_DEFAULT,
             volumeFadeEnabled = prefs[Keys.VOLUME_FADE_ENABLED] ?: true,
+            ambientEnabled = prefs[Keys.AMBIENT_ENABLED] ?: false,
+            ambientUri = prefs[Keys.AMBIENT_URI] ?: "",
+            ambientName = prefs[Keys.AMBIENT_NAME] ?: "",
+            ambientVolume = prefs[Keys.AMBIENT_VOLUME] ?: 30,
+            ambientDuckedVolume = prefs[Keys.AMBIENT_DUCKED_VOLUME] ?: 10,
+            ambientLeadSeconds = prefs[Keys.AMBIENT_LEAD_SECONDS] ?: Constants.AMBIENT_LEAD_DEFAULT,
             lastSyncAt = prefs[Keys.LAST_SYNC_AT] ?: "",
             lastSyncOk = prefs[Keys.LAST_SYNC_OK] ?: false,
             lastSyncMsg = prefs[Keys.LAST_SYNC_MSG] ?: ""
@@ -92,6 +106,35 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setVolumeFadeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.VOLUME_FADE_ENABLED] = enabled }
+    }
+
+    // ---- 副音频衬托 ----
+
+    suspend fun setAmbientEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.AMBIENT_ENABLED] = enabled }
+    }
+
+    /** 保存副音频来源（uri + 展示名，原子写入） */
+    suspend fun setAmbientSource(uri: String, name: String) {
+        context.dataStore.edit {
+            it[Keys.AMBIENT_URI] = uri
+            it[Keys.AMBIENT_NAME] = name
+        }
+    }
+
+    suspend fun setAmbientVolume(volume: Int) {
+        context.dataStore.edit { it[Keys.AMBIENT_VOLUME] = volume.coerceIn(0, 100) }
+    }
+
+    suspend fun setAmbientDuckedVolume(volume: Int) {
+        context.dataStore.edit { it[Keys.AMBIENT_DUCKED_VOLUME] = volume.coerceIn(0, 100) }
+    }
+
+    suspend fun setAmbientLeadSeconds(seconds: Int) {
+        context.dataStore.edit {
+            it[Keys.AMBIENT_LEAD_SECONDS] =
+                if (seconds in Constants.AMBIENT_LEAD_OPTIONS) seconds else Constants.AMBIENT_LEAD_DEFAULT
+        }
     }
 
     /** 写入最近一次同步结果（同时被“立即同步”与后台 Worker 调用） */

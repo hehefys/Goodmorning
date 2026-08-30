@@ -56,6 +56,18 @@
     <string name="settings_export_logs">导出运行日志</string>
     <string name="settings_version_label">版本</string>
 
+    <!-- ===== 副音频衬托（设置页播放组） ===== -->
+    <string name="ambient_label">副音频衬托</string>
+    <string name="ambient_help">闹钟先循环播放背景音乐温柔唤醒，衬托结束后自动播放视频音频；视频播放期间背景音乐压低到设定音量，播完再恢复继续一段后收场。</string>
+    <string name="ambient_pick">选择音频文件</string>
+    <string name="ambient_none">未选择</string>
+    <string name="ambient_picked_fmt">已选：%1$s</string>
+    <string name="ambient_base_volume">背景音量</string>
+    <string name="ambient_duck_volume">视频播放时压低至</string>
+    <string name="ambient_lead_label">衬托时长</string>
+    <string name="ambient_lead_fmt">%1$d 秒</string>
+    <string name="ambient_pick_failed">无法读取所选文件，请换一个音频文件</string>
+
     <!-- ===== 使用说明页（DESIGN-V2 §4，§2.4 表格顺序） ===== -->
     <string name="usage_title">使用说明</string>
     <string name="usage_s1_title">快速上手</string>
