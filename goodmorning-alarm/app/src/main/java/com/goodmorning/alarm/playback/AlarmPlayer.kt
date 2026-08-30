@@ -86,7 +86,10 @@ class AlarmPlayer(context: Context) {
                 .setUsage(C.USAGE_ALARM)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                 .build(),
-            /* handleAudioFocus = */ true
+            /* handleAudioFocus = */
+            // 必须 false：Media3 的自动焦点管理只允许 USAGE_MEDIA/GAME，
+            // USAGE_ALARM + true 会直接抛 IllegalArgumentException 导致服务创建崩溃
+            false
         )
         .build()
         .also { it.addListener(playerListener) }
