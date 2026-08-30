@@ -69,6 +69,10 @@
     <string name="ambient_lead_label">衬托时长</string>
     <string name="ambient_lead_sec_fmt">%1$d 秒</string>
     <string name="ambient_lead_min_fmt">%1$d 分 %2$d 秒</string>
+    <string name="ambient_clip_start_label">播放起点</string>
+    <string name="ambient_clip_end_label">播放终点</string>
+    <string name="ambient_clip_from_start">从头播放</string>
+    <string name="ambient_clip_to_end">播到结尾</string>
     <string name="ambient_pick_failed">无法读取所选文件，请换一个音频文件</string>
 
     <!-- ===== 使用说明页（DESIGN-V2 §4，§2.4 表格顺序） ===== -->
@@ -119,7 +123,10 @@
     <string name="settings_snooze_label">贪睡间隔</string>
     <string name="settings_snooze_minutes_fmt">%1$d 分钟</string>
     <string name="settings_fade_label">音量渐强</string>
-    <string name="settings_fade_help">响铃音量从 30% 在 20 秒内渐升至 100%</string>
+    <string name="settings_fade_help">响铃音量从 30% 渐升至 100%</string>
+    <string name="settings_fade_duration_label">渐强时长</string>
+    <string name="settings_replay_label">播完自动重播</string>
+    <string name="settings_replay_help">整段播完后若未手动停止，自动从头再播，直到手动关闭</string>
     <string name="settings_btn_sync_now">立即同步</string>
     <string name="settings_syncing">正在同步…</string>
     <string name="settings_cache_label">缓存占用</string>

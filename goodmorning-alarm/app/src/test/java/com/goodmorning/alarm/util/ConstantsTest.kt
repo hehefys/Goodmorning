@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * Constants 契约测试：固化 PRD / ARCHITECTURE.md 中约定的关键参数，
- * 防止后续改动无意偏离产品口径（贪睡 5/10/15 默认 10、渐强 30%→100%/20s、
+ * 防止后续改动无意偏离产品口径（贪睡 1~30 默认 10、渐强 30%→100% 时长 5~60s 默认 20s、
  * 同步时刻 05:30/21:00、缓存保留 3 条、RSSHub 路由模板）。
  */
 class ConstantsTest {
@@ -35,21 +35,28 @@ class ConstantsTest {
     }
 
     @Test
-    fun `贪睡默认值必须在可选项内`() {
-        assertTrue(Constants.SNOOZE_OPTIONS.contains(Constants.SNOOZE_DEFAULT))
-        assertEquals(listOf(5, 10, 15), Constants.SNOOZE_OPTIONS)
+    fun `贪睡默认值必须在可调范围内`() {
         assertEquals(10, Constants.SNOOZE_DEFAULT)
+        assertTrue(Constants.SNOOZE_DEFAULT in Constants.SNOOZE_MIN..Constants.SNOOZE_MAX)
+        assertTrue(Constants.SNOOZE_MIN < Constants.SNOOZE_MAX)
     }
 
     @Test
-    fun `音量渐强参数符合PRD_30percent起20秒线性`() {
+    fun `音量渐强参数符合PRD_30percent起且时长默认在范围内`() {
         assertEquals(0.3f, Constants.FADE_START, 0.0001f)
-        assertEquals(20_000L, Constants.FADE_DURATION_MS)
         assertEquals(500L, Constants.FADE_STEP_MS)
-        // 20s / 500ms = 40 步，每步增量 (1-0.3)/40 = 0.0175，线性收敛到 1.0
-        val steps = Constants.FADE_DURATION_MS / Constants.FADE_STEP_MS
-        assertEquals(40L, steps)
-        assertEquals(1.0f, Constants.FADE_START + steps * (1f - Constants.FADE_START) / steps, 0.0001f)
+        assertEquals(20, Constants.FADE_DEFAULT_SECONDS)
+        assertTrue(Constants.FADE_DEFAULT_SECONDS in Constants.FADE_MIN_SECONDS..Constants.FADE_MAX_SECONDS)
+    }
+
+    @Test
+    fun `副音频裁剪哨兵为0且最小间隔不小于5秒`() {
+        assertEquals(0L, Constants.AMBIENT_CLIP_UNSET)
+        assertTrue(Constants.AMBIENT_CLIP_MIN_GAP_S >= 5)
+        assertTrue(Constants.AMBIENT_LEAD_MIN < Constants.AMBIENT_LEAD_MAX)
+        assertTrue(
+            Constants.AMBIENT_LEAD_DEFAULT in Constants.AMBIENT_LEAD_MIN..Constants.AMBIENT_LEAD_MAX
+        )
     }
 
     @Test

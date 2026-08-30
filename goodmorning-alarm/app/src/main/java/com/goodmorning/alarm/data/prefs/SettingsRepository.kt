@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.goodmorning.alarm.util.Constants
@@ -30,6 +31,8 @@ class SettingsRepository(private val context: Context) {
         val RSSHUB_BASE_URL = stringPreferencesKey("rsshub_base_url")
         val SNOOZE_MINUTES = intPreferencesKey("snooze_minutes")
         val VOLUME_FADE_ENABLED = booleanPreferencesKey("volume_fade_enabled")
+        val VOLUME_FADE_SECONDS = intPreferencesKey("volume_fade_seconds")
+        val REPLAY_ENABLED = booleanPreferencesKey("replay_enabled")
 
         // ---- 副音频衬托 ----
         val AMBIENT_ENABLED = booleanPreferencesKey("ambient_enabled")
@@ -38,6 +41,9 @@ class SettingsRepository(private val context: Context) {
         val AMBIENT_VOLUME = intPreferencesKey("ambient_volume")
         val AMBIENT_DUCKED_VOLUME = intPreferencesKey("ambient_ducked_volume")
         val AMBIENT_LEAD_SECONDS = intPreferencesKey("ambient_lead_seconds")
+        val AMBIENT_START_MS = longPreferencesKey("ambient_start_ms")
+        val AMBIENT_END_MS = longPreferencesKey("ambient_end_ms")
+        val AMBIENT_DURATION_MS = longPreferencesKey("ambient_duration_ms")
         val LAST_SYNC_AT = stringPreferencesKey("last_sync_at")
         val LAST_SYNC_OK = booleanPreferencesKey("last_sync_ok")
         val LAST_SYNC_MSG = stringPreferencesKey("last_sync_msg")
@@ -62,12 +68,17 @@ class SettingsRepository(private val context: Context) {
             bloggerName = prefs[Keys.BLOGGER_NAME] ?: Settings.DEFAULT_BLOGGER_NAME,
             snoozeMinutes = prefs[Keys.SNOOZE_MINUTES] ?: Constants.SNOOZE_DEFAULT,
             volumeFadeEnabled = prefs[Keys.VOLUME_FADE_ENABLED] ?: true,
+            volumeFadeSeconds = prefs[Keys.VOLUME_FADE_SECONDS] ?: Constants.FADE_DEFAULT_SECONDS,
+            replayEnabled = prefs[Keys.REPLAY_ENABLED] ?: false,
             ambientEnabled = prefs[Keys.AMBIENT_ENABLED] ?: false,
             ambientUri = prefs[Keys.AMBIENT_URI] ?: "",
             ambientName = prefs[Keys.AMBIENT_NAME] ?: "",
             ambientVolume = prefs[Keys.AMBIENT_VOLUME] ?: 30,
             ambientDuckedVolume = prefs[Keys.AMBIENT_DUCKED_VOLUME] ?: 10,
             ambientLeadSeconds = prefs[Keys.AMBIENT_LEAD_SECONDS] ?: Constants.AMBIENT_LEAD_DEFAULT,
+            ambientStartMs = prefs[Keys.AMBIENT_START_MS] ?: Constants.AMBIENT_CLIP_UNSET,
+            ambientEndMs = prefs[Keys.AMBIENT_END_MS] ?: Constants.AMBIENT_CLIP_UNSET,
+            ambientDurationMs = prefs[Keys.AMBIENT_DURATION_MS] ?: 0L,
             lastSyncAt = prefs[Keys.LAST_SYNC_AT] ?: "",
             lastSyncOk = prefs[Keys.LAST_SYNC_OK] ?: false,
             lastSyncMsg = prefs[Keys.LAST_SYNC_MSG] ?: ""
@@ -99,13 +110,24 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSnoozeMinutes(minutes: Int) {
         context.dataStore.edit {
-            it[Keys.SNOOZE_MINUTES] =
-                if (minutes in Constants.SNOOZE_OPTIONS) minutes else Constants.SNOOZE_DEFAULT
+            it[Keys.SNOOZE_MINUTES] = minutes.coerceIn(Constants.SNOOZE_MIN, Constants.SNOOZE_MAX)
         }
     }
 
     suspend fun setVolumeFadeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.VOLUME_FADE_ENABLED] = enabled }
+    }
+
+    suspend fun setVolumeFadeSeconds(seconds: Int) {
+        context.dataStore.edit {
+            it[Keys.VOLUME_FADE_SECONDS] = seconds.coerceIn(
+                Constants.FADE_MIN_SECONDS, Constants.FADE_MAX_SECONDS
+            )
+        }
+    }
+
+    suspend fun setReplayEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.REPLAY_ENABLED] = enabled }
     }
 
     // ---- 副音频衬托 ----
@@ -114,11 +136,45 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.AMBIENT_ENABLED] = enabled }
     }
 
-    /** 保存副音频来源（uri + 展示名，原子写入） */
-    suspend fun setAmbientSource(uri: String, name: String) {
+    /**
+     * 保存副音频来源（uri + 展示名 + 探测到的文件时长，原子写入）。
+     * 换文件后旧裁剪区间必然失效，一并重置为「从头播到尾」。
+     */
+    suspend fun setAmbientSource(uri: String, name: String, durationMs: Long = 0L) {
         context.dataStore.edit {
             it[Keys.AMBIENT_URI] = uri
             it[Keys.AMBIENT_NAME] = name
+            it[Keys.AMBIENT_DURATION_MS] = durationMs.coerceAtLeast(0L)
+            it[Keys.AMBIENT_START_MS] = Constants.AMBIENT_CLIP_UNSET
+            it[Keys.AMBIENT_END_MS] = Constants.AMBIENT_CLIP_UNSET
+        }
+    }
+
+    /** 保存裁剪起点：不越过终点（终点已设时至少留出最小间隔） */
+    suspend fun setAmbientStartMs(startMs: Long) {
+        context.dataStore.edit { prefs ->
+            val end = prefs[Keys.AMBIENT_END_MS] ?: Constants.AMBIENT_CLIP_UNSET
+            val maxStart = if (end > Constants.AMBIENT_CLIP_UNSET) {
+                end - Constants.AMBIENT_CLIP_MIN_GAP_S * 1000L
+            } else {
+                Long.MAX_VALUE
+            }
+            prefs[Keys.AMBIENT_START_MS] =
+                startMs.coerceIn(Constants.AMBIENT_CLIP_UNSET, maxStart)
+        }
+    }
+
+    /** 保存裁剪终点：0 = 播到结尾；已设时不得越过起点 + 最小间隔 */
+    suspend fun setAmbientEndMs(endMs: Long) {
+        context.dataStore.edit { prefs ->
+            val start = prefs[Keys.AMBIENT_START_MS] ?: Constants.AMBIENT_CLIP_UNSET
+            val minEnd = start + Constants.AMBIENT_CLIP_MIN_GAP_S * 1000L
+            prefs[Keys.AMBIENT_END_MS] =
+                if (endMs <= Constants.AMBIENT_CLIP_UNSET) {
+                    Constants.AMBIENT_CLIP_UNSET
+                } else {
+                    endMs.coerceAtLeast(minEnd)
+                }
         }
     }
 

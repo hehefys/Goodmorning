@@ -118,9 +118,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    // ---- 播放（逻辑不变） ----
+    // ---- 播放 ----
 
-    /** 设置贪睡间隔（5/10/15） */
+    /** 设置贪睡间隔（1~30 分钟自由调节） */
     fun setSnoozeMinutes(minutes: Int) {
         viewModelScope.launch {
             settingsRepository.setSnoozeMinutes(minutes)
@@ -134,6 +134,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** 设置音量渐强时长（5~60 秒） */
+    fun setVolumeFadeSeconds(seconds: Int) {
+        viewModelScope.launch {
+            settingsRepository.setVolumeFadeSeconds(seconds)
+        }
+    }
+
+    /** 设置播完未关闭自动重播 */
+    fun setReplayEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setReplayEnabled(enabled)
+        }
+    }
+
     // ---- 副音频衬托 ----
 
     fun setAmbientEnabled(enabled: Boolean) {
@@ -142,7 +156,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * 用户从 SAF 选中副音频：持久化读权限（重启后仍可访问），
-     * 查询文件名一起入库；授权失败（极少数提供方）则不保存并提示。
+     * 查询文件名与时长一起入库（时长供裁剪滑条定边界）；授权失败则不保存并提示。
      */
     fun onAmbientPicked(uri: Uri) {
         val app = getApplication<Application>()
@@ -156,7 +170,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch {
             val name = withContext(Dispatchers.IO) { queryDisplayName(app, uri) }
-            settingsRepository.setAmbientSource(uri.toString(), name)
+            val durationMs = withContext(Dispatchers.IO) { probeDurationMs(app, uri) }
+            settingsRepository.setAmbientSource(uri.toString(), name, durationMs)
         }
     }
 
@@ -172,6 +187,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { settingsRepository.setAmbientLeadSeconds(seconds) }
     }
 
+    fun setAmbientStartMs(startMs: Long) {
+        viewModelScope.launch { settingsRepository.setAmbientStartMs(startMs) }
+    }
+
+    fun setAmbientEndMs(endMs: Long) {
+        viewModelScope.launch { settingsRepository.setAmbientEndMs(endMs) }
+    }
+
     /** 查询 content uri 的展示名（失败回退 uri 尾段） */
     private fun queryDisplayName(context: Application, uri: Uri): String {
         return runCatching {
@@ -182,6 +205,22 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
             }
         }.getOrNull() ?: uri.lastPathSegment.orEmpty()
+    }
+
+    /** 探测音频总时长（毫秒；失败/未知返回 0，裁剪滑条退化为 0~10 分钟档）。
+     *  MediaMetadataRetriever 仅 API 29+ 实现 AutoCloseable，手动 release 兼容低版本。 */
+    private fun probeDurationMs(context: Application, uri: Uri): Long {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            runCatching {
+                retriever.setDataSource(context, uri)
+                retriever.extractMetadata(
+                    android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                )?.toLongOrNull() ?: 0L
+            }.getOrDefault(0L)
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     // ---- 立即同步 / 缓存（逻辑不变） ----

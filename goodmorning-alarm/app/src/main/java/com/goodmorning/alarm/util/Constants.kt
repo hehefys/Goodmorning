@@ -33,12 +33,17 @@ object Constants {
     /** 贪睡默认间隔（分钟） */
     const val SNOOZE_DEFAULT = 10
 
-    /** 贪睡可选项（分钟） */
-    val SNOOZE_OPTIONS: List<Int> = listOf(5, 10, 15)
+    /** 贪睡间隔可调范围（分钟） */
+    const val SNOOZE_MIN = 1
+    const val SNOOZE_MAX = 30
 
     // ===== 音量渐强 =====
     const val FADE_START = 0.3f
-    const val FADE_DURATION_MS = 20_000L
+    /** 渐强时长默认值（秒） */
+    const val FADE_DEFAULT_SECONDS = 20
+    /** 渐强时长可调范围（秒） */
+    const val FADE_MIN_SECONDS = 5
+    const val FADE_MAX_SECONDS = 60
     const val FADE_STEP_MS = 500L
 
     // ===== 副音频衬托 =====
@@ -52,6 +57,10 @@ object Constants {
     const val AMBIENT_FADE_MS = 3_000L
     /** 视频音频播完后，副音频恢复续播的收尾时长 */
     const val AMBIENT_WRAP_UP_MS = 30_000L
+    /** 副音频裁剪未设置的哨兵值（起点 0 = 从头播，终点 0 = 播到结尾） */
+    const val AMBIENT_CLIP_UNSET = 0L
+    /** 副音频裁剪起点与终点最小间隔（秒） */
+    const val AMBIENT_CLIP_MIN_GAP_S = 5
 
     // ===== 第四级兜底：ToneGenerator 蜂鸣（无任何可用铃声 URI 时） =====
     /** ToneGenerator 音量（0-100） */

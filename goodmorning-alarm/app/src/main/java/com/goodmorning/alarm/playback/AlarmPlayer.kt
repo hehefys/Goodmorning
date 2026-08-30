@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -28,7 +29,7 @@ import java.io.File
  * - AudioAttributes 走 USAGE_ALARM（系统闹钟音量通道）；
  * - 禁用视频轨（纯音频，不渲染画面）；
  * - setWakeMode(WAKE_MODE_LOCAL)：息屏 + Doze 下保持 CPU 唤醒，播放不因休眠停摆（E2）；
- * - 音量渐强：30% 起，每 500ms 步进，20s 内线性升至 100%（可在设置关闭）；
+ * - 音量渐强：30% 起，每 500ms 步进，在设置时长内线性升至 100%（可在设置关闭/调节）；
  *   渐强窗口按“起播墙钟时刻”推进，暂停后 resume 会按剩余窗口重建渐强，
  *   保证任何暂停/恢复序列下最终音量必然达到 100%（E1）；
  * - 播放错误回调由 AlarmService 触发兜底降级（P0-4 绝不哑火）。
@@ -103,18 +104,36 @@ class AlarmPlayer(private val context: Context) {
     /** 副音频是否正在循环播放 */
     val isAmbientPlaying: Boolean get() = ambientPlayer?.isPlaying == true
 
-    /** 启动副音频循环（重复调用会先释放旧实例） */
-    fun startAmbient(uri: Uri, baseVolume: Float) {
+    /**
+     * 启动副音频循环（重复调用会先释放旧实例）。
+     * [startMs]/[endMs] 裁剪播放区间：0 = 从头播 / 播到结尾；循环时在裁剪区间内重复。
+     */
+    fun startAmbient(uri: Uri, baseVolume: Float, startMs: Long = 0L, endMs: Long = 0L) {
         stopAmbient()
         val p = ExoPlayer.Builder(context).build()
         p.setAudioAttributes(alarmAttributes, /* handleAudioFocus = */ false)
         p.repeatMode = Player.REPEAT_MODE_ONE
         p.volume = baseVolume.coerceIn(0f, 1f)
-        p.setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+        p.setMediaItem(clipIfSet(uri, startMs, endMs))
         p.prepare()
         p.play()
         ambientPlayer = p
-        AppLogger.i(TAG, "副音频已启动（音量 ${(baseVolume * 100).toInt()}%）")
+        AppLogger.i(
+            TAG,
+            "副音频已启动（音量 ${(baseVolume * 100).toInt()}%，裁剪 ${startMs}..${endMs}ms）"
+        )
+    }
+
+    /** 裁剪区间任一端设置时套用 ClippingConfiguration（对本地渐进式媒体生效，循环在区间内重复） */
+    private fun clipIfSet(uri: Uri, startMs: Long, endMs: Long): MediaItem {
+        if (startMs <= 0L && endMs <= 0L) return MediaItem.fromUri(uri)
+        val clip = MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(startMs.coerceAtLeast(0L))
+        if (endMs > 0L) clip.setEndPositionMs(endMs)
+        return MediaItem.Builder()
+            .setUri(uri)
+            .setClippingConfiguration(clip.build())
+            .build()
     }
 
     /** 主音频起播：副音频渐变压低 */
@@ -155,7 +174,7 @@ class AlarmPlayer(private val context: Context) {
     }
 
     /**
-     * 渐强窗口描述：从起播时刻（elapsedRealtime）起的 FADE_DURATION_MS 时长。
+     * 渐强窗口描述：从起播时刻（elapsedRealtime）起的 fadeDurationMs 时长。
      * 暂停不重置窗口——恢复时按墙钟剩余时间续算，暂停过久则直接补齐 100%。
      */
     private data class FadeWindow(val startedAtElapsed: Long, val totalMs: Long)
@@ -165,13 +184,13 @@ class AlarmPlayer(private val context: Context) {
     val isPlaying: Boolean get() = player.isPlaying
 
     /** 播放本地 mp4 文件（纯音频模式） */
-    fun playFile(file: File, fade: Boolean) {
-        playMedia(Uri.fromFile(file), fade)
+    fun playFile(file: File, fade: Boolean, fadeDurationMs: Long = DEFAULT_FADE_MS) {
+        playMedia(Uri.fromFile(file), fade, fadeDurationMs)
     }
 
     /** 播放系统铃声 URI（第三级兜底：RingtoneManager 默认闹钟铃声） */
-    fun playUri(uri: Uri, fade: Boolean) {
-        playMedia(uri, fade)
+    fun playUri(uri: Uri, fade: Boolean, fadeDurationMs: Long = DEFAULT_FADE_MS) {
+        playMedia(uri, fade, fadeDurationMs)
     }
 
     fun pause() {
@@ -203,15 +222,15 @@ class AlarmPlayer(private val context: Context) {
 
     // ---- 内部实现 ----
 
-    private fun playMedia(uri: Uri, fade: Boolean) {
+    private fun playMedia(uri: Uri, fade: Boolean, fadeDurationMs: Long) {
         fadeJob?.cancel()
-        player.setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+        player.setMediaItem(MediaItem.fromUri(uri))
         player.repeatMode = Player.REPEAT_MODE_OFF
         player.prepare()
         if (fade) {
-            fadeWindow = FadeWindow(SystemClock.elapsedRealtime(), Constants.FADE_DURATION_MS)
+            fadeWindow = FadeWindow(SystemClock.elapsedRealtime(), fadeDurationMs)
             onVolumeProgress?.invoke(0f)
-            startVolumeFade(fromVolume = Constants.FADE_START, durationMs = Constants.FADE_DURATION_MS)
+            startVolumeFade(fromVolume = Constants.FADE_START, durationMs = fadeDurationMs)
         } else {
             fadeWindow = null
             player.volume = 1f
@@ -271,5 +290,8 @@ class AlarmPlayer(private val context: Context) {
 
     private companion object {
         const val TAG = Constants.TAG_PREFIX + "Play"
+
+        /** 未显式传入渐强时长时的兜底值（设置默认 20 秒） */
+        val DEFAULT_FADE_MS = Constants.FADE_DEFAULT_SECONDS * 1000L
     }
 }

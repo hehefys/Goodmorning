@@ -30,7 +30,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -302,32 +301,21 @@ fun SettingsScreen(
 
             // ---- 组③ 播放 ----
             GroupCard(title = stringResource(R.string.settings_group_playback), icon = Icons.AutoMirrored.Filled.VolumeUp) {
-                // 条目 1：贪睡时长（5/10/15，逻辑不变）
-                Text(
-                    text = stringResource(R.string.settings_snooze_label),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Ink60
+                // 条目 1：贪睡间隔（1~30 分钟自由调节）
+                LabeledSlider(
+                    label = stringResource(R.string.settings_snooze_label),
+                    valueText = stringResource(
+                        R.string.settings_snooze_minutes_fmt, uiState.settings.snoozeMinutes
+                    ),
+                    value = uiState.settings.snoozeMinutes.toFloat(),
+                    onValueChange = { viewModel.setSnoozeMinutes(it.toInt()) },
+                    valueRange = com.goodmorning.alarm.util.Constants.SNOOZE_MIN.toFloat()..
+                        com.goodmorning.alarm.util.Constants.SNOOZE_MAX.toFloat()
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    com.goodmorning.alarm.util.Constants.SNOOZE_OPTIONS.forEach { minutes ->
-                        FilterChip(
-                            selected = uiState.settings.snoozeMinutes == minutes,
-                            onClick = { viewModel.setSnoozeMinutes(minutes) },
-                            label = {
-                                Text(
-                                    text = stringResource(
-                                        R.string.settings_snooze_minutes_fmt, minutes
-                                    )
-                                )
-                            }
-                        )
-                    }
-                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 条目 2：音量渐强（逻辑不变）
+                // 条目 2：音量渐强（开关 + 可调时长）
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -348,6 +336,42 @@ fun SettingsScreen(
                     Switch(
                         checked = uiState.settings.volumeFadeEnabled,
                         onCheckedChange = { viewModel.setVolumeFadeEnabled(it) }
+                    )
+                }
+                if (uiState.settings.volumeFadeEnabled) {
+                    LabeledSlider(
+                        label = stringResource(R.string.settings_fade_duration_label),
+                        valueText = formatSecondsText(uiState.settings.volumeFadeSeconds),
+                        value = uiState.settings.volumeFadeSeconds.toFloat(),
+                        onValueChange = { viewModel.setVolumeFadeSeconds(it.toInt()) },
+                        valueRange = com.goodmorning.alarm.util.Constants.FADE_MIN_SECONDS.toFloat()..
+                            com.goodmorning.alarm.util.Constants.FADE_MAX_SECONDS.toFloat()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 条目 2.5：播完自动重播（用户未手动关闭时从头再来，直到手动停止）
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.settings_replay_label),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Ink900
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.settings_replay_help),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Ink60
+                        )
+                    }
+                    Switch(
+                        checked = uiState.settings.replayEnabled,
+                        onCheckedChange = { viewModel.setReplayEnabled(it) }
                     )
                 }
 
@@ -428,36 +452,50 @@ fun SettingsScreen(
                         valueRange = 0f..100f
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    val leadSeconds = uiState.settings.ambientLeadSeconds
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.ambient_lead_label),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Ink60
-                        )
-                        Text(
-                            text = if (leadSeconds >= 60) {
-                                stringResource(
-                                    R.string.ambient_lead_min_fmt,
-                                    leadSeconds / 60, leadSeconds % 60
-                                )
-                            } else {
-                                stringResource(R.string.ambient_lead_sec_fmt, leadSeconds)
-                            },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Ink60
-                        )
-                    }
-                    Slider(
-                        value = leadSeconds.toFloat(),
+                    LabeledSlider(
+                        label = stringResource(R.string.ambient_lead_label),
+                        valueText = formatSecondsText(uiState.settings.ambientLeadSeconds),
+                        value = uiState.settings.ambientLeadSeconds.toFloat(),
                         onValueChange = { viewModel.setAmbientLeadSeconds(it.toInt()) },
                         valueRange = com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MIN.toFloat()..
                             com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MAX.toFloat()
                     )
+                    // 播放区间：起点/终点滑条（0 = 从头播 / 播到结尾），仅在已选文件时出现
+                    if (uiState.settings.ambientUri.isNotBlank()) {
+                        val settings = uiState.settings
+                        // 时长未知（探测失败）时退化为 10 分钟档
+                        val durSec = if (settings.ambientDurationMs > 0) {
+                            (settings.ambientDurationMs / 1000).toInt()
+                        } else {
+                            600
+                        }
+                        val startSec = (settings.ambientStartMs / 1000).toInt()
+                        val endSec = (settings.ambientEndMs / 1000).toInt()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LabeledSlider(
+                            label = stringResource(R.string.ambient_clip_start_label),
+                            valueText = if (startSec <= 0) {
+                                stringResource(R.string.ambient_clip_from_start)
+                            } else {
+                                formatSecondsText(startSec)
+                            },
+                            value = startSec.toFloat(),
+                            onValueChange = { viewModel.setAmbientStartMs(it.toInt() * 1000L) },
+                            valueRange = 0f..((durSec - com.goodmorning.alarm.util.Constants.AMBIENT_CLIP_MIN_GAP_S)
+                                .coerceAtLeast(1)).toFloat()
+                        )
+                        LabeledSlider(
+                            label = stringResource(R.string.ambient_clip_end_label),
+                            valueText = if (endSec <= 0) {
+                                stringResource(R.string.ambient_clip_to_end)
+                            } else {
+                                formatSecondsText(endSec)
+                            },
+                            value = endSec.toFloat(),
+                            onValueChange = { viewModel.setAmbientEndMs(it.toInt() * 1000L) },
+                            valueRange = 0f..durSec.toFloat()
+                        )
+                    }
                 }
             }
 
@@ -670,6 +708,47 @@ private fun SyncBadge(ok: Boolean) {
         )
     }
 }
+
+/** 「标签 + 当前值 + 滑条」行：播放组各自由调节项（贪睡/渐强/衬托/裁剪）共用 */
+@Composable
+private fun LabeledSlider(
+    label: String,
+    valueText: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = Ink60
+        )
+        Text(
+            text = valueText,
+            style = MaterialTheme.typography.labelLarge,
+            color = Ink60
+        )
+    }
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = valueRange
+    )
+}
+
+/** 秒数展示：<60 秒显示「N 秒」，≥60 显示「N 分 N 秒」 */
+@Composable
+private fun formatSecondsText(seconds: Int): String =
+    if (seconds >= 60) {
+        stringResource(R.string.ambient_lead_min_fmt, seconds / 60, seconds % 60)
+    } else {
+        stringResource(R.string.ambient_lead_sec_fmt, seconds)
+    }
 
 /** 分享最新的日志文件（filesDir/logs/ 按 namesorted 最新一份）；无日志时静默返回 */
 private fun exportLatestLog(context: android.content.Context) {
