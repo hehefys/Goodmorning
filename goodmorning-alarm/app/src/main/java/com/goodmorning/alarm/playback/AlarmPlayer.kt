@@ -46,6 +46,12 @@ class AlarmPlayer(private val context: Context) {
     var onIsPlayingChanged: ((Boolean) -> Unit)? = null
 
     /**
+     * 副音频一轮自然播完（单轮模式）或播放错误（降级为结束处理）时回调，
+     * 由 AlarmService 绑定重播触发；循环模式（repeat=ONE）下不会触发。
+     */
+    var onAmbientEnded: (() -> Unit)? = null
+
+    /**
      * 音量渐强进度回调（V2 响铃页光晕用）：0..1，渐强循环内每 FADE_STEP_MS 步进一次；
      * 渐强关闭时 [playMedia] 回调常量 0.5f。
      */
@@ -79,6 +85,21 @@ class AlarmPlayer(private val context: Context) {
         }
     }
 
+    /** 副音频播放器监听：单轮模式播完 → 重播触发；错误降级为结束，保证主链路继续 */
+    private val ambientListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) {
+                AppLogger.i(TAG, "副音频一轮播放结束")
+                onAmbientEnded?.invoke()
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            AppLogger.e(TAG, "副音频播放错误，降级为结束处理", error)
+            onAmbientEnded?.invoke()
+        }
+    }
+
     /** 闹钟音频属性（主/副播放器共用；USAGE_ALARM 通道）。
      *  handleAudioFocus 必须为 false：Media3 仅允许 MEDIA/GAME 自动管焦点，
      *  USAGE_ALARM + true 会抛 IllegalArgumentException 使服务创建即崩（真机日志实锤）。 */
@@ -107,20 +128,29 @@ class AlarmPlayer(private val context: Context) {
     /**
      * 启动副音频循环（重复调用会先释放旧实例）。
      * [startMs]/[endMs] 裁剪播放区间：0 = 从头播 / 播到结尾；循环时在裁剪区间内重复。
+     * [loop] = false 时单轮播放：播到裁剪终点/文件结尾即触发 [onAmbientEnded]（重播链路用）。
      */
-    fun startAmbient(uri: Uri, baseVolume: Float, startMs: Long = 0L, endMs: Long = 0L) {
+    fun startAmbient(
+        uri: Uri,
+        baseVolume: Float,
+        startMs: Long = 0L,
+        endMs: Long = 0L,
+        loop: Boolean = true
+    ) {
         stopAmbient()
         val p = ExoPlayer.Builder(context).build()
         p.setAudioAttributes(alarmAttributes, /* handleAudioFocus = */ false)
-        p.repeatMode = Player.REPEAT_MODE_ONE
+        p.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         p.volume = baseVolume.coerceIn(0f, 1f)
         p.setMediaItem(clipIfSet(uri, startMs, endMs))
+        p.addListener(ambientListener)
         p.prepare()
         p.play()
         ambientPlayer = p
         AppLogger.i(
             TAG,
-            "副音频已启动（音量 ${(baseVolume * 100).toInt()}%，裁剪 ${startMs}..${endMs}ms）"
+            "副音频已启动（音量 ${(baseVolume * 100).toInt()}%，裁剪 ${startMs}..${endMs}ms，" +
+                if (loop) "循环" else "单轮"
         )
     }
 
@@ -148,11 +178,17 @@ class AlarmPlayer(private val context: Context) {
         AppLogger.i(TAG, "副音频恢复至 ${(baseVolume * 100).toInt()}%")
     }
 
-    /** 停止并释放副音频 */
+    /** 停止并释放副音频（先摘监听，避免 stop/release 触发结束回调造成误重播） */
     fun stopAmbient() {
         ambientFadeJob?.cancel()
         ambientFadeJob = null
-        ambientPlayer?.let { p -> runCatching { p.stop(); p.release() } }
+        ambientPlayer?.let { p ->
+            runCatching {
+                p.removeListener(ambientListener)
+                p.stop()
+                p.release()
+            }
+        }
         ambientPlayer = null
     }
 

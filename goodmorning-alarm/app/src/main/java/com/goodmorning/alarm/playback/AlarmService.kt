@@ -21,6 +21,8 @@ import androidx.core.content.ContextCompat
 import com.goodmorning.alarm.R
 import com.goodmorning.alarm.alarm.AlarmScheduler
 import com.goodmorning.alarm.alarm.SelectionPolicy
+import com.goodmorning.alarm.data.db.VideoEntity
+import com.goodmorning.alarm.data.prefs.Settings
 import com.goodmorning.alarm.data.prefs.SettingsRepository
 import com.goodmorning.alarm.data.repo.VideoRepository
 import com.goodmorning.alarm.sync.SyncEngine
@@ -76,11 +78,25 @@ class AlarmService : Service() {
     /** 当前正在播放的本地文件路径（用于错误时清理坏文件） */
     private var currentPlayingPath: String? = null
 
+    /** 当前正在播放的视频（重播时刷新通知标题用；停止/贪睡时清空） */
+    private var currentVideo: VideoEntity? = null
+
+    /** 本次选片的播放来源日志值（副音频早于衬托播完提前起播时补记用） */
+    private var lastSourceLogValue: String = Constants.SOURCE_TODAY
+
+    /** 主音频是否已起播（区分副音频结束发生在衬托期还是陪衬期） */
+    @Volatile
+    private var mainStarted = false
+
+    /** 衬托期倒计时任务：副音频单轮提前播完时取消，立即起播主音频 */
+    private var leadJob: Job? = null
+
     override fun onCreate() {
         super.onCreate()
         player = AlarmPlayer(this).apply {
             onError = { throwable -> onPlayerError(throwable) }
             onEnded = { onMainEnded() }
+            onAmbientEnded = { onAmbientEnded() }
         }
     }
 
@@ -142,35 +158,27 @@ class AlarmService : Service() {
                 val video = result.video
                 val localPath = video?.localPath
                 if (video != null && !localPath.isNullOrBlank() && File(localPath).isFile) {
-                    // 副音频衬托期：先循环背景音乐（可在设置裁剪起止区间），衬托结束再起播视频音频
+                    mainStarted = false
+                    currentPlayingPath = localPath
+                    currentVideo = video
+                    lastSourceLogValue = result.source.toLogValue()
+                    ringtoneAttempted = false
                     if (settings.ambientEnabled && settings.ambientUri.isNotBlank()) {
+                        // 重播开启 → 副音频单轮播完触发重播；重播关闭 → 保持无限循环陪衬
                         player.startAmbient(
                             Uri.parse(settings.ambientUri),
                             settings.ambientVolume / 100f,
                             settings.ambientStartMs,
-                            settings.ambientEndMs
+                            settings.ambientEndMs,
+                            loop = !settings.replayEnabled
                         )
-                        delay(settings.ambientLeadSeconds * 1000L)
-                        // 衬托期间用户可能已停止/贪睡：卫兵已复位则本场作废
-                        if (!ringingGuard.get()) return@launch
+                        leadJob = serviceScope.launch {
+                            delay(settings.ambientLeadSeconds * 1000L)
+                            startMain(localPath, video, settings, result.source.toLogValue())
+                        }
+                    } else {
+                        startMain(localPath, video, settings, result.source.toLogValue())
                     }
-                    currentPlayingPath = localPath
-                    ringtoneAttempted = false
-                    player.playFile(
-                        File(localPath),
-                        settings.volumeFadeEnabled,
-                        settings.volumeFadeSeconds * 1000L
-                    )
-                    if (player.isAmbientPlaying) {
-                        player.duckAmbient(settings.ambientDuckedVolume / 100f)
-                    }
-                    updateNotificationContent(
-                        title = video.title.ifBlank { getString(R.string.notif_ring_title) },
-                        text = getString(R.string.ringing_publish_date_fmt, video.publishDate)
-                    )
-                    runCatching { repository.logPlayback(video.id, result.source.toLogValue()) }
-                        .onFailure { AppLogger.w(TAG, "记录播放日志失败", it) }
-                    AppLogger.i(TAG, "选片命中：${result.source} ${video.id}「${video.title}」")
                 } else {
                     playFallback("无可用缓存视频（候选 ${videos.size} 条）")
                 }
@@ -180,6 +188,38 @@ class AlarmService : Service() {
                 playFallback("异常: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    /**
+     * 起播主音频（衬托到点 / 副音频单轮提前播完 / 无副音频三种路径共用）：
+     * 渐强起播 → 副音频仍在播则压低陪衬 → 刷新通知 → 记录播放日志。
+     * 衬托期间用户可能已停止/贪睡：卫兵已复位则本场作废。
+     */
+    private fun startMain(
+        localPath: String,
+        video: VideoEntity,
+        settings: Settings,
+        sourceLogValue: String
+    ) {
+        if (!ringingGuard.get()) return
+        mainStarted = true
+        player.playFile(
+            File(localPath),
+            settings.volumeFadeEnabled,
+            settings.volumeFadeSeconds * 1000L
+        )
+        if (player.isAmbientPlaying) {
+            player.duckAmbient(settings.ambientDuckedVolume / 100f)
+        }
+        updateNotificationContent(
+            title = video.title.ifBlank { getString(R.string.notif_ring_title) },
+            text = getString(R.string.ringing_publish_date_fmt, video.publishDate)
+        )
+        serviceScope.launch {
+            runCatching { repository.logPlayback(video.id, sourceLogValue) }
+                .onFailure { AppLogger.w(TAG, "记录播放日志失败", it) }
+        }
+        AppLogger.i(TAG, "选片命中「${video.title}」，主音频起播")
     }
 
     /**
@@ -243,9 +283,11 @@ class AlarmService : Service() {
 
     /**
      * 主音频自然播完：
-     * - 自动重播开启且用户未手动停止 → 从头再播主音频（副音频保持压低陪衬）；
-     * - 有副音频 → 恢复音量续播收尾段（AMBIENT_WRAP_UP_MS）后停止；
-     * - 无副音频 → 立即收场（原行为）。
+     * - 重播开启且副音频陪衬中 → 触发权交给副音频结束事件，此处静候；
+     * - 重播开启但副音频不在播（未启用/加载失败/已耗尽）→ 退回「主音频播完即重播」，
+     *   保证重播链路绝不哑火；
+     * - 重播关闭 → 原行为：有副音频恢复音量续播收尾段（AMBIENT_WRAP_UP_MS）后停止，
+     *   无副音频立即收场。
      */
     private fun onMainEnded() {
         if (!ringingGuard.get()) return
@@ -256,11 +298,20 @@ class AlarmService : Service() {
                 return@launch
             }
             val path = currentPlayingPath
-            if (settings.replayEnabled && path != null) {
-                AppLogger.i(TAG, "主音频播完，用户未关闭，自动重播")
-                player.playFile(
-                    File(path), settings.volumeFadeEnabled, settings.volumeFadeSeconds * 1000L
-                )
+            if (settings.replayEnabled) {
+                if (player.isAmbientPlaying) {
+                    AppLogger.i(TAG, "主音频播完，副音频陪衬中 → 等待其结束后重播")
+                    return@launch
+                }
+                if (path != null && File(path).isFile) {
+                    AppLogger.i(TAG, "主音频播完且副音频不在播 → 直接重播主音频")
+                    player.playFile(
+                        File(path), settings.volumeFadeEnabled, settings.volumeFadeSeconds * 1000L
+                    )
+                    return@launch
+                }
+                AppLogger.w(TAG, "重播时主音频文件不可用 → 停止本场响铃")
+                handleStop()
                 return@launch
             }
             if (!player.isAmbientPlaying) {
@@ -273,16 +324,68 @@ class AlarmService : Service() {
         }
     }
 
+    /**
+     * 副音频一轮播完（重播触发点）：
+     * - 主音频未起播（单轮副音频早于衬托时长播完）→ 取消衬托倒计时，立即起播主音频，
+     *   并以压低音量重启一轮副音频陪衬；
+     * - 主音频在播 → 重播主音频 + 重启一轮副音频（压低），循环往复直到用户手动关闭；
+     * - 主音频文件不可用 → 停止本场响铃。
+     * 副音频播放错误在 AlarmPlayer 内已降级为结束事件走到这里，链路不中断。
+     */
+    private fun onAmbientEnded() {
+        if (!ringingGuard.get()) return
+        serviceScope.launch {
+            val settings = runCatching { settingsRepository.current() }.getOrNull()
+            if (settings == null || !settings.replayEnabled) {
+                // 循环模式不会自然结束；走到这里说明重播已被关闭，保持现状即可
+                AppLogger.w(TAG, "副音频结束但重播未开启，忽略")
+                return@launch
+            }
+            val path = currentPlayingPath
+            val video = currentVideo
+            if (path == null || video == null || !File(path).isFile) {
+                AppLogger.w(TAG, "副音频结束后主音频不可用 → 停止本场响铃")
+                handleStop()
+                return@launch
+            }
+            if (!mainStarted) {
+                AppLogger.i(TAG, "副音频一轮播完早于衬托时长 → 提前起播主音频")
+                leadJob?.cancel()
+                leadJob = null
+                startMain(path, video, settings, lastSourceLogValue)
+            } else {
+                AppLogger.i(TAG, "副音频一轮播完 → 自动重播主音频")
+                player.playFile(
+                    File(path), settings.volumeFadeEnabled, settings.volumeFadeSeconds * 1000L
+                )
+            }
+            if (settings.ambientEnabled && settings.ambientUri.isNotBlank()) {
+                // 以压低音量重启一轮单轮副音频陪衬（主音频在播，无需再 duck）
+                player.startAmbient(
+                    Uri.parse(settings.ambientUri),
+                    settings.ambientDuckedVolume / 100f,
+                    settings.ambientStartMs,
+                    settings.ambientEndMs,
+                    loop = false
+                )
+            }
+        }
+    }
+
     // ---- 控制命令 ----
 
     /** 停止本次响铃：停播（含副音频）、撤通知、注册明天闹钟、补调度同步 */
     private fun handleStop() {
         stopToneFallback()
+        leadJob?.cancel()
+        leadJob = null
         player.stop()
         player.stopAmbient()
         ringingGuard.set(false)
         ringtoneAttempted = false
         currentPlayingPath = null
+        currentVideo = null
+        mainStarted = false
         serviceScope.launch {
             val settings = settingsRepository.current()
             if (settings.alarmEnabled) {
@@ -298,10 +401,14 @@ class AlarmService : Service() {
     /** 贪睡：停播（含副音频）、撤通知、N 分钟后一次性精确闹钟重跑完整流程 */
     private fun handleSnooze() {
         stopToneFallback()
+        leadJob?.cancel()
+        leadJob = null
         player.stop()
         player.stopAmbient()
         ringingGuard.set(false)
         currentPlayingPath = null
+        currentVideo = null
+        mainStarted = false
         serviceScope.launch {
             val settings = settingsRepository.current()
             val scheduled = alarmScheduler.scheduleSnooze(settings.snoozeMinutes)

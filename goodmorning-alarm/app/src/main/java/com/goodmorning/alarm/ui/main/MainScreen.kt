@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Warning
@@ -76,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.goodmorning.alarm.R
+import com.goodmorning.alarm.playback.AlarmService
 import com.goodmorning.alarm.ui.theme.AlarmTimeStyle
 import com.goodmorning.alarm.ui.theme.CountdownStyle
 import com.goodmorning.alarm.ui.theme.Dawn80
@@ -94,6 +96,7 @@ import com.goodmorning.alarm.ui.theme.Sunrise700
 import com.goodmorning.alarm.ui.theme.SunriseSurface
 import com.goodmorning.alarm.ui.theme.WarnContainer
 import com.goodmorning.alarm.ui.theme.OnWarnContainer
+import com.goodmorning.alarm.util.Constants
 import com.goodmorning.alarm.util.Permissions
 import com.goodmorning.alarm.util.TimeUtils
 import java.util.Locale
@@ -113,6 +116,7 @@ fun MainScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showTimePicker by remember { mutableStateOf(false) }
+    var showReplayTestDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // F5：onResume 刷新权限状态（从系统设置页返回后立即生效，无需等下一秒 ticker）
@@ -184,6 +188,23 @@ fun MainScreen(
                 onEditTime = { showTimePicker = true }
             )
 
+            // 重播链路测试按键：立即触发一次完整响铃演练（副音频→主音频→副音频播完重播）
+            OutlinedButton(
+                onClick = { showReplayTestDialog = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = ShapeMedium
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Replay,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = stringResource(R.string.test_ring_button))
+            }
+
             // 状态卡片区（当前博主 / 同步状态 / 缓存条数）
             StatusCard(uiState)
 
@@ -218,6 +239,30 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // 重播链路测试确认框：避免误触立即响铃，确认后启动完整响铃服务
+    if (showReplayTestDialog) {
+        AlertDialog(
+            onDismissRequest = { showReplayTestDialog = false },
+            title = { Text(text = stringResource(R.string.test_ring_dialog_title)) },
+            text = { Text(text = stringResource(R.string.test_ring_dialog_text)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showReplayTestDialog = false
+                        AlarmService.start(context, Constants.ACTION_RING)
+                    }
+                ) {
+                    Text(text = stringResource(R.string.btn_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReplayTestDialog = false }) {
+                    Text(text = stringResource(R.string.btn_cancel))
+                }
+            }
+        )
     }
 
     // 时间选择对话框：表盘 ⇄ 键入双模式（键入直达，表盘直观）

@@ -10,6 +10,9 @@
     <string name="alarm_switch_label">启用闹钟</string>
     <string name="next_ring_prefix">下次响铃</string>
     <string name="next_ring_countdown_prefix">距下次响铃</string>
+    <string name="test_ring_button">重播测试 · 立即响铃</string>
+    <string name="test_ring_dialog_title">重播链路测试</string>
+    <string name="test_ring_dialog_text">将按当前设置立即开始一次完整响铃演练：副音频衬托 → 主音频 → 副音频单轮播完自动重播。可在通知栏点「停止」结束。</string>
     <string name="snooze_active_prefix">稍后提醒中</string>
     <string name="alarm_disabled_hint">闹钟已关闭，开启后到点将播放早安音频</string>
     <string name="exact_alarm_not_granted">未授予精确闹钟权限，请前往权限引导开启</string>
