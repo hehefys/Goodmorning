@@ -24,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.EditCalendar
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -43,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -217,8 +220,9 @@ fun MainScreen(
         }
     }
 
-    // 时间选择对话框（逻辑不变）
+    // 时间选择对话框：表盘 ⇄ 键入双模式（键入直达，表盘直观）
     if (showTimePicker) {
+        var inputMode by remember { mutableStateOf(false) }
         val timePickerState = rememberTimePickerState(
             initialHour = uiState.settings.alarmHour,
             initialMinute = uiState.settings.alarmMinute,
@@ -226,9 +230,28 @@ fun MainScreen(
         )
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
-            title = { Text(text = stringResource(R.string.alarm_time_label)) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.alarm_time_label),
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { inputMode = !inputMode }) {
+                        Icon(
+                            imageVector = if (inputMode) Icons.Filled.EditCalendar else Icons.Filled.Keyboard,
+                            contentDescription = stringResource(
+                                if (inputMode) R.string.time_picker_to_dial else R.string.time_picker_to_input
+                            )
+                        )
+                    }
+                }
+            },
             text = {
-                TimePicker(state = timePickerState)
+                if (inputMode) {
+                    TimeInput(state = timePickerState)
+                } else {
+                    TimePicker(state = timePickerState)
+                }
             },
             confirmButton = {
                 TextButton(

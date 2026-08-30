@@ -5,6 +5,8 @@
     <!-- ===== 主页 ===== -->
     <string name="main_subtitle">用「每日早安」的早安音频叫醒你</string>
     <string name="alarm_time_label">闹钟时间</string>
+    <string name="time_picker_to_input">切换为键盘输入</string>
+    <string name="time_picker_to_dial">切换为表盘选择</string>
     <string name="alarm_switch_label">启用闹钟</string>
     <string name="next_ring_prefix">下次响铃</string>
     <string name="next_ring_countdown_prefix">距下次响铃</string>
