@@ -14,3 +14,11 @@ goodmorning-alarm.zip
 
 # IDE
 .idea/
+
+# 签名密钥（切勿入库）
+*.jks
+*.keystore
+
+# 无关项目与工作区元数据
+dyproxy/
+.workbuddy/
