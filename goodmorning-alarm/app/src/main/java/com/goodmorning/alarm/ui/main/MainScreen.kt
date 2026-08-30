@@ -266,13 +266,6 @@ private fun PermissionWarnCard(
                     Permissions.notificationSettingsIntent(context)
             )
         }
-        if (!uiState.fullScreenIntentGranted) {
-            add(
-                stringResource(R.string.main_perm_banner_fullscreen) to
-                    (Permissions.fullScreenIntentSettingsIntent(context)
-                        ?: Permissions.appDetailsIntent(context))
-            )
-        }
         if (!uiState.exactAlarmGranted) {
             add(
                 stringResource(R.string.main_perm_banner_exact_alarm) to

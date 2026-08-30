@@ -56,8 +56,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val exactAlarmGranted: Boolean = true,
         /** 通知权限是否已授予（F5 常驻提醒） */
         val notificationsGranted: Boolean = true,
-        /** Android 14+ 全屏显示通知权限（F5 常驻提醒；低版本恒为 true） */
-        val fullScreenIntentGranted: Boolean = true,
         /** V2：本地缓存视频条数（状态卡行③展示） */
         val cacheCount: Int = 0
     )
@@ -84,7 +82,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             snoozeUntilMillis = snoozeUntil?.takeIf { it > now },
             exactAlarmGranted = Permissions.canScheduleExactAlarms(app),
             notificationsGranted = Permissions.areNotificationsEnabled(app),
-            fullScreenIntentGranted = Permissions.canUseFullScreenIntent(app),
             cacheCount = cached
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())

@@ -62,6 +62,9 @@ class GoodMorningApp : Application() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = getString(com.goodmorning.alarm.R.string.notif_channel_alarm_desc)
+                // 响铃音频由 AlarmService 经 USAGE_ALARM 播放，渠道本身必须静音，
+                // 否则通知音会叠加在闹钟音频之上（参考 ClockYou 的做法）
+                setSound(null, null)
             }
         )
         nm.createNotificationChannel(

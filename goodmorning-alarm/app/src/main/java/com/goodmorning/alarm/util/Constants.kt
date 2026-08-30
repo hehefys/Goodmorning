@@ -56,7 +56,9 @@ object Constants {
     const val ACTION_PLAY_PAUSE = "com.goodmorning.alarm.action.PLAY_PAUSE"
 
     // ===== 通知 =====
-    const val CHANNEL_ALARM = "alarm_channel"
+    // v2：渠道创建后声音设置不可变；响铃音频由服务经 USAGE_ALARM 播放，
+    // 渠道必须静音避免通知音混入闹钟音，故启用新 ID。
+    const val CHANNEL_ALARM = "alarm_channel_v2"
     const val CHANNEL_SYNC = "sync_channel"
     const val NOTIF_ID_RINGING = 2001
 
