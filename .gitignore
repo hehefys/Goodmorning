@@ -1,0 +1,16 @@
+# Node / dyproxy
+dyproxy/node_modules/
+dyproxy/browsers/
+dyproxy/npm-cache/
+dyproxy/cookie.txt
+
+# Android build outputs
+goodmorning-alarm/.gradle/
+goodmorning-alarm/.kotlin/
+goodmorning-alarm/app/build/
+goodmorning-alarm/app/release/
+goodmorning-alarm/local.properties
+goodmorning-alarm.zip
+
+# IDE
+.idea/

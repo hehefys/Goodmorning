@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">每日早安</string>
+
+    <!-- ===== 主页 ===== -->
+    <string name="main_subtitle">用「每日早安」的早安音频叫醒你</string>
+    <string name="alarm_time_label">闹钟时间</string>
+    <string name="time_picker_to_input">切换为键盘输入</string>
+    <string name="time_picker_to_dial">切换为表盘选择</string>
+    <string name="alarm_switch_label">启用闹钟</string>
+    <string name="next_ring_prefix">下次响铃</string>
+    <string name="next_ring_countdown_prefix">距下次响铃</string>
+    <string name="test_ring_button">重播测试 · 立即响铃</string>
+    <string name="test_ring_dialog_title">重播链路测试</string>
+    <string name="test_ring_dialog_text">将按当前设置立即开始一次完整响铃演练：副音频衬托 → 主音频 → 副音频单轮播完自动重播。可在通知栏点「停止」结束。</string>
+    <string name="snooze_active_prefix">稍后提醒中</string>
+    <string name="alarm_disabled_hint">闹钟已关闭，开启后到点将播放早安音频</string>
+    <string name="exact_alarm_not_granted">未授予精确闹钟权限，请前往权限引导开启</string>
+    <string name="sync_status_label">最近同步</string>
+    <string name="sync_status_never">尚未同步</string>
+    <string name="sync_ok_fmt">成功 · %1$s · %2$d 条可用</string>
+    <string name="sync_fail_fmt">失败 · %1$s · %2$s</string>
+    <string name="btn_settings">设置</string>
+    <string name="btn_permission_guide">权限引导</string>
+    <string name="btn_confirm">确定</string>
+    <string name="btn_cancel">取消</string>
+
+    <!-- ===== 主页权限常驻提醒（F5） ===== -->
+    <string name="main_perm_banner_notification">未开启通知权限，闹钟响铃时可能无法提醒</string>
+    <string name="main_perm_banner_fullscreen">未开启全屏显示通知，锁屏时可能无法弹出响铃页</string>
+    <string name="main_perm_banner_exact_alarm">未授予精确闹钟权限，闹钟可能无法准时响铃</string>
+    <string name="main_perm_go_open">去开启</string>
+
+    <!-- ===== 主页 V2（DESIGN-V2 §4） ===== -->
+    <string name="main_label_next_ring">距下次响铃</string>
+    <string name="main_blogger_label">当前博主</string>
+    <string name="main_cache_count_fmt">已缓存 %1$d 条视频</string>
+    <string name="main_alarm_off_hint">闹钟已关闭</string>
+    <string name="main_snooze_center_fmt">稍后 %1$s</string>
+    <string name="badge_sync_ok">成功</string>
+    <string name="badge_sync_fail">失败</string>
+
+    <!-- ===== 设置页 V2：博主（DESIGN-V2 §4） ===== -->
+    <string name="settings_blogger_title">博主管理</string>
+    <string name="settings_blogger_current">当前博主</string>
+    <string name="settings_blogger_change">更换博主</string>
+    <string name="settings_blogger_help">更换后将清空旧缓存并立即同步</string>
+    <string name="blogger_dialog_title">更换博主</string>
+    <string name="blogger_dialog_desc">粘贴博主抖音主页链接，或直接粘贴 sec_uid</string>
+    <string name="blogger_dialog_hint">https://www.douyin.com/user/… 或 sec_uid</string>
+    <string name="blogger_dialog_confirm">确认更换</string>
+    <string name="blogger_parse_error">无法识别，请粘贴抖音主页链接或 sec_uid</string>
+    <string name="blogger_validate_fail_fmt">校验失败：%1$s，未做更改</string>
+    <string name="blogger_switch_ok_fmt">已切换为「%1$s」，正在重新同步</string>
+
+    <!-- ===== 设置页 V2：分组与关于 ===== -->
+    <string name="settings_group_source">数据源</string>
+    <string name="settings_group_playback">播放</string>
+    <string name="settings_group_about">关于</string>
+    <string name="settings_usage_guide">使用说明</string>
+    <string name="settings_export_logs">导出运行日志</string>
+    <string name="settings_version_label">版本</string>
+
+    <!-- ===== 副音频衬托（设置页播放组） ===== -->
+    <string name="ambient_label">副音频衬托</string>
+    <string name="ambient_help">闹钟先循环播放背景音乐温柔唤醒，衬托结束后自动播放视频音频；视频播放期间背景音乐压低到设定音量，播完再恢复继续一段后收场。</string>
+    <string name="ambient_pick">选择音频文件</string>
+    <string name="ambient_none">未选择</string>
+    <string name="ambient_picked_fmt">已选：%1$s</string>
+    <string name="ambient_base_volume">背景音量</string>
+    <string name="ambient_duck_volume">视频播放时压低至</string>
+    <string name="ambient_lead_label">衬托时长</string>
+    <string name="ambient_lead_off">不衬托</string>
+    <string name="ambient_lead_sec_fmt">%1$d 秒</string>
+    <string name="ambient_lead_min_fmt">%1$d 分 %2$d 秒</string>
+    <string name="duration_edit_hint">直接输入 %1$d~%2$d 之间的数值</string>
+    <string name="duration_edit_error">数值需在 %1$d~%2$d 之间</string>
+    <string name="duration_edit_unit_sec">秒</string>
+    <string name="duration_edit_unit_min">分钟</string>
+    <string name="ambient_clip_start_label">播放起点</string>
+    <string name="ambient_clip_end_label">播放终点</string>
+    <string name="ambient_clip_from_start">从头播放</string>
+    <string name="ambient_clip_to_end">播到结尾</string>
+    <string name="ambient_pick_failed">无法读取所选文件，请换一个音频文件</string>
+
+    <!-- ===== 使用说明页（DESIGN-V2 §4，§2.4 表格顺序） ===== -->
+    <string name="usage_title">使用说明</string>
+    <string name="usage_s1_title">快速上手</string>
+    <string name="usage_s1_step1">① 主页设置响铃时间并打开开关</string>
+    <string name="usage_s1_step2">② 按引导页完成全部 5 项权限</string>
+    <string name="usage_s1_step3">③ 点「立即同步」验证数据源，之后每天 05:30 / 21:00 自动同步</string>
+    <string name="usage_s2_title">权限说明</string>
+    <string name="usage_s2_p1">通知权限：展示响铃通知。不开则锁屏可能收不到响铃提醒。</string>
+    <string name="usage_s2_p2">精确闹钟：保证准点响铃。不开则可能延迟数分钟。</string>
+    <string name="usage_s2_p3">自启动：开机后恢复闹钟。不开则重启手机后闹钟丢失。</string>
+    <string name="usage_s2_p4">省电策略「无限制」：防止系统杀后台。不开则闹钟可能整晚被杀。</string>
+    <string name="usage_s2_p5">全屏显示通知：锁屏直接弹出响铃页。不开则只收到普通通知。</string>
+    <string name="usage_s3_title">同步与数据源</string>
+    <string name="usage_s3_p1">RSSHub 地址是视频数据源；公共实例对抖音路由不稳定，报 EMPTY/PARSE 属已知现象，不影响响铃（有缓存与铃声兜底）。</string>
+    <string name="usage_s3_p2">每天 05:30 与 21:00 自动同步并缓存最近视频；「立即同步」可手动触发验证。</string>
+    <string name="usage_s4_title">响铃页操作</string>
+    <string name="usage_s4_p1">向右滑到底停止响铃；「稍后提醒」按设定间隔再响；圆形键暂停/继续；「打开抖音」直达博主主页。</string>
+    <string name="usage_s5_title">常见问题</string>
+    <string name="usage_s5_q1">不响？依次查：①省电策略无限制 ②精确闹钟允许 ③自启动开启 ④最近任务上锁。</string>
+    <string name="usage_s5_q2">缓存最多保留 3 条视频（约 10–50MB/条），可在设置页清除。</string>
+    <string name="usage_s5_q3">更换博主会清空旧博主缓存并重新下载新博主最近视频。</string>
+
+    <!-- ===== 响铃页 ===== -->
+    <string name="ringing_today_source">今日早安</string>
+    <string name="ringing_cached_source">最近一期</string>
+    <string name="ringing_fallback_source">默认铃声</string>
+    <string name="ringing_not_updated_tip">今日尚未更新，为你播放最近一期</string>
+    <string name="ringing_fallback_tip">暂无可用音频，已切换系统默认闹钟铃声</string>
+    <string name="ringing_publish_date_fmt">发布于 %1$s</string>
+    <string name="ringing_btn_stop">停止</string>
+    <string name="ringing_btn_snooze">稍后提醒</string>
+    <string name="ringing_btn_pause">暂停</string>
+    <string name="ringing_btn_resume">继续播放</string>
+    <string name="ringing_loading">闹钟加载中，请稍候…</string>
+    <string name="ringing_slide_to_stop">滑动停止响铃</string>
+    <!-- 响铃页「打开抖音看最新视频」按钮：数据源不可靠时一键拉起抖音直达博主主页（方案 A 兜底入口） -->
+    <string name="ringing_open_douyin">打开抖音看最新视频</string>
+
+    <!-- ===== 设置页 ===== -->
+    <string name="settings_title">设置</string>
+    <string name="settings_rsshub_url_label">RSSHub 地址</string>
+    <string name="settings_rsshub_url_hint">如 https://rsshub.app 或自建实例</string>
+    <string name="settings_rsshub_url_help">公共实例可能因抖音反爬而不稳定，建议自建 RSSHub 后替换此地址</string>
+    <string name="settings_btn_save_url">保存并同步</string>
+    <string name="settings_btn_restore_default">恢复默认</string>
+    <string name="settings_snooze_label">贪睡间隔</string>
+    <string name="settings_snooze_minutes_fmt">%1$d 分钟</string>
+    <string name="settings_fade_label">音量渐强</string>
+    <string name="settings_fade_help">响铃音量从 30% 渐升至 100%</string>
+    <string name="settings_fade_duration_label">渐强时长</string>
+    <string name="settings_replay_label">播完自动重播</string>
+    <string name="settings_replay_help">整段播完后若未手动停止，自动从头再播，直到手动关闭</string>
+    <string name="settings_btn_sync_now">立即同步</string>
+    <string name="settings_syncing">正在同步…</string>
+    <string name="settings_cache_label">缓存占用</string>
+    <string name="settings_btn_clear_cache">清理缓存</string>
+    <string name="settings_cache_cleared">缓存已清理</string>
+    <string name="settings_btn_guide">重新进入权限引导</string>
+
+    <!-- ===== 权限引导 ===== -->
+    <string name="guide_title">权限引导</string>
+    <string name="guide_subtitle">为保证 HyperOS 下闹钟准时响起，请依次完成以下设置</string>
+    <string name="guide_step_notification">通知权限</string>
+    <string name="guide_step_notification_why">响铃时的前台通知与提示需要通知权限，否则无法在通知栏显示停止按钮</string>
+    <string name="guide_step_exact_alarm">精确闹钟权限</string>
+    <string name="guide_step_exact_alarm_why">允许 App 在设定时刻准点触发闹钟（不受省电策略延迟）</string>
+    <string name="guide_step_autostart">自启动</string>
+    <string name="guide_step_autostart_why">开机后自动恢复闹钟，否则重启手机后闹钟会失效</string>
+    <string name="guide_step_battery">省电策略无限制</string>
+    <string name="guide_step_battery_why">避免系统杀后台导致同步与响铃失败，请在系统设置中把本应用设为“无限制”</string>
+    <string name="guide_step_full_screen">全屏显示通知</string>
+    <string name="guide_step_full_screen_why">锁屏响铃页弹出需要该权限，被拒后响铃时锁屏只剩通知栏条目</string>
+    <string name="guide_btn_go_settings">去设置</string>
+    <string name="guide_status_done">已完成</string>
+    <string name="guide_status_todo">未完成</string>
+    <string name="guide_status_manual">需手动确认</string>
+    <string name="guide_btn_finish">完成</string>
+    <string name="guide_skip_hint">以上设置也可稍后在系统设置中手动开启</string>
+    <string name="guide_jump_failed">无法直达该页面，请到系统设置中手动查找</string>
+
+    <!-- ===== 通知 ===== -->
+    <string name="notif_channel_alarm_name">早安闹钟</string>
+    <string name="notif_channel_alarm_desc">响铃时的前台通知与全屏提醒</string>
+    <string name="notif_channel_sync_name">后台同步</string>
+    <string name="notif_channel_sync_desc">视频缓存同步的结果通知（低打扰）</string>
+    <string name="notif_ring_title">早安时间到</string>
+    <string name="notif_ring_text">点击查看响铃页面</string>
+    <string name="notif_action_stop">停止</string>
+
+    <!-- ===== 通用 ===== -->
+    <string name="time_format_hm">HH:mm</string>
+    <string name="unknown_error">未知错误</string>
+</resources>
