@@ -70,8 +70,13 @@
     <string name="ambient_base_volume">背景音量</string>
     <string name="ambient_duck_volume">视频播放时压低至</string>
     <string name="ambient_lead_label">衬托时长</string>
+    <string name="ambient_lead_off">不衬托</string>
     <string name="ambient_lead_sec_fmt">%1$d 秒</string>
     <string name="ambient_lead_min_fmt">%1$d 分 %2$d 秒</string>
+    <string name="duration_edit_hint">直接输入 %1$d~%2$d 之间的数值</string>
+    <string name="duration_edit_error">数值需在 %1$d~%2$d 之间</string>
+    <string name="duration_edit_unit_sec">秒</string>
+    <string name="duration_edit_unit_min">分钟</string>
     <string name="ambient_clip_start_label">播放起点</string>
     <string name="ambient_clip_end_label">播放终点</string>
     <string name="ambient_clip_from_start">从头播放</string>

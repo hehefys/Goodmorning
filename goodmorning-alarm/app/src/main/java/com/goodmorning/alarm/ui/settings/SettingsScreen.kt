@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,6 +97,8 @@ fun SettingsScreen(
     var showBloggerDialog by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf(false)
     }
+    // 当前正在键入的时长项（null=无；EDIT_* 见文件底部常量）
+    var editingDuration by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMessage) {
         toastMessage?.let {
@@ -301,7 +304,7 @@ fun SettingsScreen(
 
             // ---- 组③ 播放 ----
             GroupCard(title = stringResource(R.string.settings_group_playback), icon = Icons.AutoMirrored.Filled.VolumeUp) {
-                // 条目 1：贪睡间隔（1~30 分钟自由调节）
+                // 条目 1：贪睡间隔（1~30 分钟自由调节，点数值可直接键入）
                 LabeledSlider(
                     label = stringResource(R.string.settings_snooze_label),
                     valueText = stringResource(
@@ -310,7 +313,8 @@ fun SettingsScreen(
                     value = uiState.settings.snoozeMinutes.toFloat(),
                     onValueChange = { viewModel.setSnoozeMinutes(it.toInt()) },
                     valueRange = com.goodmorning.alarm.util.Constants.SNOOZE_MIN.toFloat()..
-                        com.goodmorning.alarm.util.Constants.SNOOZE_MAX.toFloat()
+                        com.goodmorning.alarm.util.Constants.SNOOZE_MAX.toFloat(),
+                    onEditRequested = { editingDuration = EDIT_SNOOZE }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -345,7 +349,8 @@ fun SettingsScreen(
                         value = uiState.settings.volumeFadeSeconds.toFloat(),
                         onValueChange = { viewModel.setVolumeFadeSeconds(it.toInt()) },
                         valueRange = com.goodmorning.alarm.util.Constants.FADE_MIN_SECONDS.toFloat()..
-                            com.goodmorning.alarm.util.Constants.FADE_MAX_SECONDS.toFloat()
+                            com.goodmorning.alarm.util.Constants.FADE_MAX_SECONDS.toFloat(),
+                        onEditRequested = { editingDuration = EDIT_FADE }
                     )
                 }
 
@@ -454,11 +459,16 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     LabeledSlider(
                         label = stringResource(R.string.ambient_lead_label),
-                        valueText = formatSecondsText(uiState.settings.ambientLeadSeconds),
+                        valueText = if (uiState.settings.ambientLeadSeconds <= 0) {
+                            stringResource(R.string.ambient_lead_off)
+                        } else {
+                            formatSecondsText(uiState.settings.ambientLeadSeconds)
+                        },
                         value = uiState.settings.ambientLeadSeconds.toFloat(),
                         onValueChange = { viewModel.setAmbientLeadSeconds(it.toInt()) },
                         valueRange = com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MIN.toFloat()..
-                            com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MAX.toFloat()
+                            com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MAX.toFloat(),
+                        onEditRequested = { editingDuration = EDIT_LEAD }
                     )
                     // 播放区间：起点/终点滑条（0 = 从头播 / 播到结尾），仅在已选文件时出现
                     if (uiState.settings.ambientUri.isNotBlank()) {
@@ -542,6 +552,37 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // ---- 时长直接输入对话框（双模式之「键入」）：确认后走与滑条相同的设置链路 ----
+    when (editingDuration) {
+        EDIT_SNOOZE -> DurationEditDialog(
+            title = stringResource(R.string.settings_snooze_label),
+            initial = uiState.settings.snoozeMinutes,
+            min = com.goodmorning.alarm.util.Constants.SNOOZE_MIN,
+            max = com.goodmorning.alarm.util.Constants.SNOOZE_MAX,
+            unitLabel = stringResource(R.string.duration_edit_unit_min),
+            onConfirm = { viewModel.setSnoozeMinutes(it); editingDuration = null },
+            onDismiss = { editingDuration = null }
+        )
+        EDIT_FADE -> DurationEditDialog(
+            title = stringResource(R.string.settings_fade_duration_label),
+            initial = uiState.settings.volumeFadeSeconds,
+            min = com.goodmorning.alarm.util.Constants.FADE_MIN_SECONDS,
+            max = com.goodmorning.alarm.util.Constants.FADE_MAX_SECONDS,
+            unitLabel = stringResource(R.string.duration_edit_unit_sec),
+            onConfirm = { viewModel.setVolumeFadeSeconds(it); editingDuration = null },
+            onDismiss = { editingDuration = null }
+        )
+        EDIT_LEAD -> DurationEditDialog(
+            title = stringResource(R.string.ambient_lead_label),
+            initial = uiState.settings.ambientLeadSeconds,
+            min = com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MIN,
+            max = com.goodmorning.alarm.util.Constants.AMBIENT_LEAD_MAX,
+            unitLabel = stringResource(R.string.duration_edit_unit_sec),
+            onConfirm = { viewModel.setAmbientLeadSeconds(it); editingDuration = null },
+            onDismiss = { editingDuration = null }
+        )
     }
 
     // ---- 更换博主对话框（DESIGN-V2 §3.1.3） ----
@@ -709,14 +750,21 @@ private fun SyncBadge(ok: Boolean) {
     }
 }
 
-/** 「标签 + 当前值 + 滑条」行：播放组各自由调节项（贪睡/渐强/衬托/裁剪）共用 */
+/** 时长键入对话框的目标项标识 */
+private const val EDIT_SNOOZE = "snooze"
+private const val EDIT_FADE = "fade"
+private const val EDIT_LEAD = "lead"
+
+/** 「标签 + 当前值 + 滑条」行：播放组各自由调节项（贪睡/渐强/衬托/裁剪）共用。
+ *  双模式交互：拖动滑条互动调节；点击当前值弹出输入框直接键入精确数值（类闹钟双模式）。 */
 @Composable
 private fun LabeledSlider(
     label: String,
     valueText: String,
     value: Float,
     onValueChange: (Float) -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>
+    valueRange: ClosedFloatingPointRange<Float>,
+    onEditRequested: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -728,16 +776,97 @@ private fun LabeledSlider(
             style = MaterialTheme.typography.labelLarge,
             color = Ink60
         )
-        Text(
-            text = valueText,
-            style = MaterialTheme.typography.labelLarge,
-            color = Ink60
-        )
+        if (onEditRequested != null) {
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelLarge,
+                color = Sunrise700,
+                fontWeight = FontWeight.W600,
+                modifier = Modifier.clickable(onClick = onEditRequested)
+            )
+        } else {
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelLarge,
+                color = Ink60
+            )
+        }
     }
     Slider(
         value = value,
         onValueChange = onValueChange,
         valueRange = valueRange
+    )
+}
+
+/**
+ * 时长直接输入对话框（双模式中的「键入」模式，对齐时间选择器的 TimeInput 交互）：
+ * 纯数字键盘输入，范围外实时标错并禁用确认，确认后经 ViewModel → Repository 钳制落库。
+ * [unitLabel] 为显示单位（秒/分钟），[initial]/[min]/[max] 均以该单位计。
+ */
+@Composable
+private fun DurationEditDialog(
+    title: String,
+    initial: Int,
+    min: Int,
+    max: Int,
+    unitLabel: String,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var input by remember { mutableStateOf(initial.toString()) }
+    val parsed = input.toIntOrNull()
+    val valid = parsed != null && parsed in min..max
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = ShapeMedium,
+        title = { Text(text = title) },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.duration_edit_hint, min, max),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Ink60
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { newValue ->
+                        // 只允许数字，杜绝非法字符进入状态
+                        if (newValue.all { it.isDigit() }) input = newValue
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    suffix = { Text(text = unitLabel, color = Ink60) },
+                    isError = !valid,
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    )
+                )
+                if (!valid) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.duration_edit_error, min, max),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnWarnContainer
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { parsed?.let(onConfirm) },
+                enabled = valid
+            ) {
+                Text(text = stringResource(R.string.btn_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(R.string.btn_cancel))
+            }
+        }
     )
 }
 

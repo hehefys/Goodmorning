@@ -53,6 +53,8 @@ class ConstantsTest {
     fun `副音频裁剪哨兵为0且最小间隔不小于5秒`() {
         assertEquals(0L, Constants.AMBIENT_CLIP_UNSET)
         assertTrue(Constants.AMBIENT_CLIP_MIN_GAP_S >= 5)
+        // 衬托时长最小值为 0（0 = 不衬托，直接起播主音频）
+        assertEquals(0, Constants.AMBIENT_LEAD_MIN)
         assertTrue(Constants.AMBIENT_LEAD_MIN < Constants.AMBIENT_LEAD_MAX)
         assertTrue(
             Constants.AMBIENT_LEAD_DEFAULT in Constants.AMBIENT_LEAD_MIN..Constants.AMBIENT_LEAD_MAX

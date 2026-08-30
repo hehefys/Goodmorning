@@ -247,6 +247,34 @@ class AlarmPlayer(private val context: Context) {
         player.clearMediaItems()
     }
 
+    /**
+     * 手动停止的渐弱收尾（竞品普遍具备的 gentle stop 体验）：
+     * [fadeMs] 内音量线性降至 0 后停播；未在播则立即停。
+     * finally 保证任何取消/异常路径下必然停播，不影响「可靠停止」不变量。
+     */
+    fun stopWithFadeOut(fadeMs: Long = DEFAULT_STOP_FADE_MS, onFinished: () -> Unit = {}) {
+        fadeJob?.cancel()
+        if (!player.isPlaying) {
+            stop()
+            onFinished()
+            return
+        }
+        val startVolume = player.volume
+        fadeJob = scope.launch {
+            try {
+                val steps = (fadeMs / FADE_OUT_STEP_MS).coerceAtLeast(1)
+                repeat(steps.toInt()) {
+                    if (!isActive) return@launch
+                    player.volume = (player.volume - startVolume / steps).coerceAtLeast(0f)
+                    delay(FADE_OUT_STEP_MS)
+                }
+            } finally {
+                runCatching { stop() }
+                onFinished()
+            }
+        }
+    }
+
     fun release() {
         fadeJob?.cancel()
         fadeWindow = null
@@ -329,5 +357,9 @@ class AlarmPlayer(private val context: Context) {
 
         /** 未显式传入渐强时长时的兜底值（设置默认 20 秒） */
         val DEFAULT_FADE_MS = Constants.FADE_DEFAULT_SECONDS * 1000L
+
+        /** 手动停止渐弱收尾默认时长与步进 */
+        const val DEFAULT_STOP_FADE_MS = 600L
+        const val FADE_OUT_STEP_MS = 50L
     }
 }

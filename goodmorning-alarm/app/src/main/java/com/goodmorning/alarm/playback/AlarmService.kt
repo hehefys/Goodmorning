@@ -91,6 +91,9 @@ class AlarmService : Service() {
     /** 衬托期倒计时任务：副音频单轮提前播完时取消，立即起播主音频 */
     private var leadJob: Job? = null
 
+    /** 会话代号：每次新响铃 +1；渐弱收尾回调据此判断是否已被新会话接管 */
+    private var sessionSeq = 0
+
     override fun onCreate() {
         super.onCreate()
         player = AlarmPlayer(this).apply {
@@ -115,6 +118,7 @@ class AlarmService : Service() {
             Constants.ACTION_SNOOZE -> handleSnooze()
             else -> {
                 if (ringingGuard.compareAndSet(false, true)) {
+                    sessionSeq++
                     selectAndPlay()
                 } else {
                     AppLogger.i(TAG, "重复 ACTION_RING 到达，忽略（已在响铃）")
@@ -163,8 +167,11 @@ class AlarmService : Service() {
                     currentVideo = video
                     lastSourceLogValue = result.source.toLogValue()
                     ringtoneAttempted = false
-                    if (settings.ambientEnabled && settings.ambientUri.isNotBlank()) {
-                        // 重播开启 → 副音频单轮播完触发重播；重播关闭 → 保持无限循环陪衬
+                    if (settings.ambientEnabled && settings.ambientUri.isNotBlank() &&
+                        settings.ambientLeadSeconds > 0
+                    ) {
+                        // 衬托开启且时长>0：重播开启 → 副音频单轮播完触发重播；
+                        // 重播关闭 → 保持无限循环陪衬。时长=0 表示不衬托，直接走主音频。
                         player.startAmbient(
                             Uri.parse(settings.ambientUri),
                             settings.ambientVolume / 100f,
@@ -300,7 +307,10 @@ class AlarmService : Service() {
             val path = currentPlayingPath
             if (settings.replayEnabled) {
                 if (player.isAmbientPlaying) {
-                    AppLogger.i(TAG, "主音频播完，副音频陪衬中 → 等待其结束后重播")
+                    // 主音频已停，无音量需要压低：先还原副音频原始音量再等待重播触发点
+                    AppLogger.i(TAG, "主音频播完，副音频陪衬中 → 还原其音量并等待结束后重播")
+                    runCatching { player.restoreAmbient(settings.ambientVolume / 100f) }
+                        .onFailure { AppLogger.w(TAG, "副音频音量还原失败", it) }
                     return@launch
                 }
                 if (path != null && File(path).isFile) {
@@ -374,49 +384,66 @@ class AlarmService : Service() {
 
     // ---- 控制命令 ----
 
-    /** 停止本次响铃：停播（含副音频）、撤通知、注册明天闹钟、补调度同步 */
+    /** 停止本次响铃：副音频即停，主音频 600ms 渐弱收尾后撤通知、注册明天闹钟、补调度同步 */
     private fun handleStop() {
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
-        player.stop()
         player.stopAmbient()
         ringingGuard.set(false)
         ringtoneAttempted = false
         currentPlayingPath = null
         currentVideo = null
         mainStarted = false
+        val gen = sessionSeq
         serviceScope.launch {
-            val settings = settingsRepository.current()
-            if (settings.alarmEnabled) {
-                // 每日自续期：响完算明天同一时刻再 setExact
-                alarmScheduler.scheduleNextDaily(settings.alarmHour, settings.alarmMinute)
+            // 渐弱收尾完成后再做收尾登记，避免服务提前退出截断渐弱
+            player.stopWithFadeOut {
+                serviceScope.launch {
+                    // 渐弱期间新响铃已接管 → 本场收尾登记全部让位，不得撤前台/杀服务
+                    if (gen != sessionSeq) return@launch
+                    val settings = settingsRepository.current()
+                    if (settings.alarmEnabled) {
+                        // 每日自续期：响完算明天同一时刻再 setExact
+                        alarmScheduler.scheduleNextDaily(settings.alarmHour, settings.alarmMinute)
+                    }
+                    runCatching { SyncScheduler.scheduleNext(this@AlarmService) }
+                    ServiceCompat.stopForeground(
+                        this@AlarmService, ServiceCompat.STOP_FOREGROUND_REMOVE
+                    )
+                    stopSelf()
+                }
             }
-            runCatching { SyncScheduler.scheduleNext(this@AlarmService) }
-            ServiceCompat.stopForeground(this@AlarmService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
         }
     }
 
-    /** 贪睡：停播（含副音频）、撤通知、N 分钟后一次性精确闹钟重跑完整流程 */
+    /** 贪睡：副音频即停，主音频渐弱收尾后撤通知，N 分钟后一次性精确闹钟重跑完整流程 */
     private fun handleSnooze() {
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
-        player.stop()
         player.stopAmbient()
         ringingGuard.set(false)
         currentPlayingPath = null
         currentVideo = null
         mainStarted = false
+        val gen = sessionSeq
         serviceScope.launch {
             val settings = settingsRepository.current()
-            val scheduled = alarmScheduler.scheduleSnooze(settings.snoozeMinutes)
-            if (!scheduled) {
-                AppLogger.w(TAG, "贪睡注册无精确闹钟权限，已降级注册")
+            player.stopWithFadeOut {
+                serviceScope.launch {
+                    // 渐弱期间新响铃已接管 → 贪睡仍要注册，但不得撤前台/杀服务
+                    val scheduled = alarmScheduler.scheduleSnooze(settings.snoozeMinutes)
+                    if (!scheduled) {
+                        AppLogger.w(TAG, "贪睡注册无精确闹钟权限，已降级注册")
+                    }
+                    if (gen != sessionSeq) return@launch
+                    ServiceCompat.stopForeground(
+                        this@AlarmService, ServiceCompat.STOP_FOREGROUND_REMOVE
+                    )
+                    stopSelf()
+                }
             }
-            ServiceCompat.stopForeground(this@AlarmService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
         }
     }
 

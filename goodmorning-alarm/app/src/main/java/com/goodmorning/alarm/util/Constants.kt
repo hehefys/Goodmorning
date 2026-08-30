@@ -47,8 +47,8 @@ object Constants {
     const val FADE_STEP_MS = 500L
 
     // ===== 副音频衬托 =====
-    /** 衬托时长可调范围下限（秒） */
-    const val AMBIENT_LEAD_MIN = 10
+    /** 衬托时长可调范围下限（秒）；0 = 不衬托，直接起播主音频 */
+    const val AMBIENT_LEAD_MIN = 0
     /** 衬托时长可调范围上限（秒） */
     const val AMBIENT_LEAD_MAX = 600
     /** 默认衬托时长（秒） */
