@@ -53,6 +53,7 @@
     <string name="settings_group_playback">播放</string>
     <string name="settings_group_about">关于</string>
     <string name="settings_usage_guide">使用说明</string>
+    <string name="settings_export_logs">导出运行日志</string>
     <string name="settings_version_label">版本</string>
 
     <!-- ===== 使用说明页（DESIGN-V2 §4，§2.4 表格顺序） ===== -->

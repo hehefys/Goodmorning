@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -91,6 +92,7 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showBloggerDialog by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf(false)
     }
@@ -363,7 +365,13 @@ fun SettingsScreen(
                     label = stringResource(R.string.settings_btn_guide),
                     onClick = onNavigateToGuide
                 )
-                // 条目 3：版本
+                // 条目 3：导出运行日志（排查响铃/同步问题的现场证据）
+                AboutRow(
+                    icon = Icons.AutoMirrored.Filled.Send,
+                    label = stringResource(R.string.settings_export_logs),
+                    onClick = { exportLatestLog(context) }
+                )
+                // 条目 4：版本
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -549,6 +557,28 @@ private fun SyncBadge(ok: Boolean) {
             color = color,
             modifier = Modifier
                 .padding(horizontal = 8.dp, vertical = 2.dp)
+        )
+    }
+}
+
+/** 分享最新的日志文件（filesDir/logs/ 按 namesorted 最新一份）；无日志时静默返回 */
+private fun exportLatestLog(context: android.content.Context) {
+    val logDir = java.io.File(
+        context.filesDir, com.goodmorning.alarm.util.Constants.LOG_DIR
+    )
+    val latest = logDir.listFiles()?.maxByOrNull { it.lastModified() } ?: return
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context, "${context.packageName}.fileprovider", latest
+    )
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_SUBJECT, latest.name)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching {
+        context.startActivity(
+            android.content.Intent.createChooser(send, latest.name)
         )
     }
 }
