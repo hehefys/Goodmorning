@@ -130,25 +130,33 @@ class AlarmService : Service() {
             return START_NOT_STICKY
         }
 
-        // 息屏可靠性②：到点去重兜底（主判重在 AlarmReceiver）。
-        // 控制命令不受影响；重复到点时先补一次前台调用（Android 8+ 要求
+        // 息屏可靠性②：到点去重（主判重在 AlarmReceiver，此处只兜底）。
+        // 控制命令不受影响；确属重复到点时先补一次前台调用（Android 8+ 要求
         // startForegroundService 后必须进前台，否则系统会判定启动超时），再安全退出。
         if (intent.action != Constants.ACTION_STOP && intent.action != Constants.ACTION_SNOOZE) {
-            val triggerAt = intent.getLongExtra(
-                Constants.EXTRA_TRIGGER_AT, System.currentTimeMillis()
-            )
             // 主页测试键强制触发，不参与去重
             val force = intent.getBooleanExtra(Constants.EXTRA_FORCE, false)
-            if (force) RingGuard.reset(this)
-            if (!force && !RingGuard.shouldHandle(this, triggerAt)) {
-                AppLogger.w(TAG, "重复到点已忽略（不再重复/叠加播放）：triggerAt=$triggerAt")
-                runCatching { startForegroundCompat() }
-                    .onFailure { AppLogger.w(TAG, "重复到点分支进入前台失败", it) }
-                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
+            // Receiver 已判过重并带上触发时刻 → 本场身份明确，绝不能再判一次
+            val dedupePassed = intent.getBooleanExtra(Constants.EXTRA_DEDUPE_PASSED, false)
+            if (force) {
+                // 手动测试：清掉水位且**不写入**，否则测试用的「当前时刻」会变成
+                // 后续真实闹钟的判重基准，把紧随其后的真实到点误杀（实测误杀过 31s 后的闹钟）
+                RingGuard.reset(this)
+            } else if (!dedupePassed) {
+                // 未经 Receiver 的异常路径（如 PendingIntent 直达）：兜底判一次
+                val now = System.currentTimeMillis()
+                if (!RingGuard.shouldHandle(this, now)) {
+                    AppLogger.w(TAG, "重复到点已忽略（不再重复/叠加播放）：now=$now")
+                    runCatching { startForegroundCompat() }
+                        .onFailure { AppLogger.w(TAG, "重复到点分支进入前台失败", it) }
+                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                RingGuard.markHandled(this, now)
+            } else {
+                AppLogger.i(TAG, "到点已由 Receiver 完成去重，直接起播")
             }
-            RingGuard.markHandled(this, triggerAt)
         }
 
         // 息屏可靠性③：先占前台（Doze 下必须在系统给的窗口内完成），再建播放器。
@@ -666,11 +674,23 @@ class AlarmService : Service() {
          * 启动响铃服务。
          * @param force 手动触发（主页测试键）时为 true：跳过到点去重，
          *              避免连续测试被判重逻辑拦掉（真实闹钟到点一律 false）
+         * @param triggerAt 闹钟的计划触发时刻；非 [Long.MIN_VALUE] 时一同带给服务，
+         *                  并置上 [Constants.EXTRA_DEDUPE_PASSED]，
+         *                  告诉服务「本场已判过重，别再判一次把自己杀掉」
          */
-        fun start(context: Context, action: String, force: Boolean = false) {
+        fun start(
+            context: Context,
+            action: String,
+            force: Boolean = false,
+            triggerAt: Long = Long.MIN_VALUE
+        ) {
             val intent = Intent(context, AlarmService::class.java).apply {
                 this.action = action
                 if (force) putExtra(Constants.EXTRA_FORCE, true)
+                if (triggerAt != Long.MIN_VALUE) {
+                    putExtra(Constants.EXTRA_TRIGGER_AT, triggerAt)
+                    putExtra(Constants.EXTRA_DEDUPE_PASSED, true)
+                }
             }
             ContextCompat.startForegroundService(context, intent)
         }

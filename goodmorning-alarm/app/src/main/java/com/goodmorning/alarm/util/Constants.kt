@@ -7,7 +7,7 @@ object Constants {
 
     // ===== 应用版本 =====
     /** 版本号（设置页「关于」展示；未启用 BuildConfig 时使用此常量） */
-    const val APP_VERSION = "2.1.1"
+    const val APP_VERSION = "2.1.2"
 
     // ===== 数据源 =====
     /** 抖音用户「每日早安」的 sec_uid */
@@ -94,8 +94,18 @@ object Constants {
     const val EXTRA_TRIGGER_AT = "trigger_at"
     /** 手动触发（主页测试键）：跳过去重 */
     const val EXTRA_FORCE = "force"
-    /** 计划触发时刻差值小于此值即视为同一场闹钟（ms） */
-    const val RING_DEDUPE_WINDOW_MS = 60_000L
+    /**
+     * 已由 AlarmReceiver 完成去重的标记。
+     * 带上它，Service 就不再二次判重——否则 Receiver 刚记下水位，
+     * Service 拿当前时间一比（差值仅几十毫秒）就会把自己判成重复而哑火。
+     */
+    const val EXTRA_DEDUPE_PASSED = "dedupe_passed"
+    /**
+     * 计划触发时刻差值小于此值即视为同一场闹钟（ms）。
+     * 取 15s：系统对同一场闹钟的重复/延迟投递间隔远小于此，
+     * 而 60s 会把「刚刚响过 + 用户马上新设的闹钟」也误杀掉。
+     */
+    const val RING_DEDUPE_WINDOW_MS = 15_000L
 
     // ===== 目录 =====
     const val VIDEO_DIR = "videos"

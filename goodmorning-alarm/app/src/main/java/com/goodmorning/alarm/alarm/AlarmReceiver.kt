@@ -14,8 +14,11 @@ import com.goodmorning.alarm.util.Constants
  *
  * 息屏可靠性要点：
  * 1. 先持 PARTIAL_WAKE_LOCK —— 覆盖「到点 → 服务出声」这段空档，避免设备再次浅睡导致哑火；
+ *    锁不在这里主动释放，交给服务的 onCreate 接管（后者会同时释放本把锁，无缝交棒）；
  * 2. 先补发高优先级兜底通知（服务起来后由同一 ID 无缝接管）；
- * 3. 启动前台服务；精确闹钟不受 Android 12+ 后台启动前台服务限制，
+ * 3. 启动前台服务，并把「计划触发时刻」带给服务，同时置
+ *    [Constants.EXTRA_DEDUPE_PASSED] 表明本场已判过重——服务据此不再二次判重；
+ * 4. 精确闹钟不受 Android 12+ 后台启动前台服务限制，
  *    但厂商 ROM 可能在瞬时状态下拒绝，故失败后用 goAsync 保活并延迟重试一次。
  */
 class AlarmReceiver : BroadcastReceiver() {
@@ -40,29 +43,31 @@ class AlarmReceiver : BroadcastReceiver() {
         // ③ 兜底通知：即使前台服务被拦截，用户仍可见可控（停止/贪睡）
         AlarmService.notifyFallback(appContext)
 
-        // ③ 启动前台服务（失败则延迟重试一次）
-        if (tryStartService(appContext)) {
-            // 服务已在 onCreate/起播前自行持锁，交棒完成
-            RingWakeLock.release()
+        // ④ 启动前台服务（失败则延迟重试一次）
+        if (tryStartService(appContext, triggerAt)) {
+            // 服务起来后会在 onCreate 自行持锁并接管（会同时释放本把锁），
+            // 此处不主动释放——先放锁再让服务拿会留出一段无人持锁的空档。
+            // 万一服务始终没起来，锁有 10 分钟超时兜底释放。
             return
         }
         val pendingResult = goAsync()
         Handler(Looper.getMainLooper()).postDelayed({
             try {
-                if (!tryStartService(appContext)) {
+                if (!tryStartService(appContext, triggerAt)) {
                     AppLogger.e(TAG, "二次启动仍失败，已依赖兜底通知")
+                    // 服务没起来 → 必须自己放锁，不等超时
+                    RingWakeLock.release()
                 }
             } finally {
-                RingWakeLock.release()
                 pendingResult.finish()
             }
         }, RETRY_DELAY_MS)
     }
 
     /** 尝试启动响铃服务；返回是否调用成功（不代表音频已出声） */
-    private fun tryStartService(context: Context): Boolean =
+    private fun tryStartService(context: Context, triggerAt: Long): Boolean =
         runCatching {
-            AlarmService.start(context, Constants.ACTION_RING)
+            AlarmService.start(context, Constants.ACTION_RING, triggerAt = triggerAt)
             true
         }.onFailure { AppLogger.e(TAG, "启动响铃前台服务失败", it) }.getOrDefault(false)
 
