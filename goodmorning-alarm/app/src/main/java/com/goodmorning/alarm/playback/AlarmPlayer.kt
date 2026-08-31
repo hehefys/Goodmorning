@@ -150,7 +150,7 @@ class AlarmPlayer(private val context: Context) {
         AppLogger.i(
             TAG,
             "副音频已启动（音量 ${(baseVolume * 100).toInt()}%，裁剪 ${startMs}..${endMs}ms，" +
-                if (loop) "循环" else "单轮"
+                if (loop) "循环）" else "单轮）"
         )
     }
 
