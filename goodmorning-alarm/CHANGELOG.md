@@ -4,6 +4,35 @@
 
 ---
 
+## 2.1.1 — 2026-08-31 · 响铃可靠性：息屏准时 + 异常不卡死
+
+### 修复
+- **息屏不响铃**（真机实证：闹钟定 08:01、精确=true，实际延迟到 08:23:53 才补投）：
+  调度改为 `setAlarmClock` 优先——官方保证系统永不调整其投递时间、必要时退出低功耗模式；
+  降级链 `setExactAndAllowWhileIdle → setWindow → setAndAllowWhileIdle`。
+  `canScheduleExact` 兼认 `USE_EXACT_ALARM`（Android 14+ `SCHEDULE_EXACT_ALARM` 默认拒绝）。
+- **到点到出声的空档被系统休眠打断**：新增 `RingWakeLock`（`PARTIAL_WAKE_LOCK` 覆盖到点 → 出声）。
+- **重复到点叠加播放**：新增 `RingGuard`（设备保护存储记录 triggerAt，60s 内重复到点丢弃，主判重在 Receiver）。
+- **Doze 下空等网络**：缓存为空且设备处于 Doze 时跳过现场同步，直走兜底铃声，不再白等 8 秒。
+
+### 加固（QA 观察项 O1）
+- 响铃协程新增 `CoroutineExceptionHandler` 兜底：任何逸出的未捕获异常统一降级到兜底铃声，
+  每场只降级一次，避免异常循环打转。
+- 停止 / 贪睡收尾流程：读设置或续期调度失败也必定撤前台、停服务，
+  用户按下的「停止」不会再卡在「通知还在、关不掉」。
+- 贪睡注册优先保障：设置读取失败时退回默认间隔，绝不把用户静音丢弃。
+- 逐点防护：主音频起播 / 重播 / 副音频起播与重启 / 渐弱收尾 / 蜂鸣循环
+  各自 `runCatching` 兜底，单点失败不拖垮整场响铃。
+- 副音频起播失败不再拖累主音频——跳过衬托立即起播主音频。
+- 服务进前台或播放器创建失败不再让整场响铃崩溃（通知权限被撤等场景）。
+
+### 内部
+- 清单补齐 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`，receiver/service 标 `directBootAware`；
+  通知渠道加锁屏可见 + 免打扰穿透。
+- 服务 `startForeground` 先于 ExoPlayer 创建，避免在 Doze 唤醒短窗口内超时。
+
+---
+
 ## 2.1.0 — 2026-08-30 · 播放体验全面可定制
 
 ### 新增

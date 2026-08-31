@@ -7,7 +7,7 @@ object Constants {
 
     // ===== 应用版本 =====
     /** 版本号（设置页「关于」展示；未启用 BuildConfig 时使用此常量） */
-    const val APP_VERSION = "2.1.0"
+    const val APP_VERSION = "2.1.1"
 
     // ===== 数据源 =====
     /** 抖音用户「每日早安」的 sec_uid */
