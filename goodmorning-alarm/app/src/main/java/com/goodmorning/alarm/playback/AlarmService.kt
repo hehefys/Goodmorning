@@ -33,6 +33,8 @@ import com.goodmorning.alarm.sync.SyncScheduler
 import com.goodmorning.alarm.util.AppLogger
 import com.goodmorning.alarm.util.Constants
 import com.goodmorning.alarm.util.TimeUtils
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,7 +61,24 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class AlarmService : Service() {
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /**
+     * 协程兜底（QA O1 加固）：任何逸出 try/catch 的未捕获异常都不得导致
+     * 「服务卡在响铃态——既没声音、通知也停不掉」。捕获后统一降级到兜底铃声，
+     * 保证用户至少能听见；[fallbackEngaged] 限制每场只降级一次，避免异常循环打转。
+     */
+    private val crashHandler = CoroutineExceptionHandler { _, throwable ->
+        AppLogger.e(TAG, "响铃协程未捕获异常", throwable)
+        if (fallbackEngaged.compareAndSet(false, true)) {
+            runCatching { playFallback("协程异常: ${throwable.message ?: throwable.javaClass.simpleName}") }
+                .onFailure { AppLogger.e(TAG, "异常后兜底再失败，本场只能停响", it) }
+        }
+    }
+
+    /** 本场是否已因异常进入兜底（新的一场响铃时复位） */
+    private val fallbackEngaged = AtomicBoolean(false)
+
+    private val serviceScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + crashHandler)
 
     private val settingsRepository by lazy { SettingsRepository(this) }
     private val repository by lazy { VideoRepository(this) }
@@ -123,7 +142,8 @@ class AlarmService : Service() {
             if (force) RingGuard.reset(this)
             if (!force && !RingGuard.shouldHandle(this, triggerAt)) {
                 AppLogger.w(TAG, "重复到点已忽略（不再重复/叠加播放）：triggerAt=$triggerAt")
-                startForegroundCompat()
+                runCatching { startForegroundCompat() }
+                    .onFailure { AppLogger.w(TAG, "重复到点分支进入前台失败", it) }
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -131,9 +151,16 @@ class AlarmService : Service() {
             RingGuard.markHandled(this, triggerAt)
         }
 
-        // 息屏可靠性③：先占前台（Doze 下必须在系统给的窗口内完成），再建播放器
-        startForegroundCompat()
-        ensurePlayer()
+        // 息屏可靠性③：先占前台（Doze 下必须在系统给的窗口内完成），再建播放器。
+        // O1 加固：进前台失败（通知权限被撤等）不能把整场响铃带崩——通知没了也要出声。
+        runCatching { startForegroundCompat() }
+            .onFailure { AppLogger.e(TAG, "进入前台失败（通知权限？），继续尝试出声", it) }
+        // 播放器创建失败则连主音频都放不了，直接降到最后防线蜂鸣
+        runCatching { ensurePlayer() }.onFailure {
+            AppLogger.e(TAG, "播放器创建失败，直接走蜂鸣兜底", it)
+            playToneFallback("播放器创建失败: ${it.message ?: it.javaClass.simpleName}")
+            return START_NOT_STICKY
+        }
 
         when (intent.action) {
             Constants.ACTION_STOP -> handleStop()
@@ -141,6 +168,7 @@ class AlarmService : Service() {
             else -> {
                 if (ringingGuard.compareAndSet(false, true)) {
                     sessionSeq++
+                    fallbackEngaged.set(false)
                     selectAndPlay()
                 } else {
                     AppLogger.i(TAG, "重复 ACTION_RING 到达，忽略（已在响铃）")
@@ -212,15 +240,26 @@ class AlarmService : Service() {
                     ) {
                         // 衬托开启且时长>0：重播开启 → 副音频单轮播完触发重播；
                         // 重播关闭 → 保持无限循环陪衬。时长=0 表示不衬托，直接走主音频。
-                        player.startAmbient(
-                            Uri.parse(settings.ambientUri),
-                            settings.ambientVolume / 100f,
-                            settings.ambientStartMs,
-                            settings.ambientEndMs,
-                            loop = !settings.replayEnabled
-                        )
-                        leadJob = serviceScope.launch {
-                            delay(settings.ambientLeadSeconds * 1000L)
+                        // O1 加固：副音频起播失败（文件被删/授权失效）不影响主音频——
+                        // 直接跳过衬托立即起播，绝不因为陪衬没起来就整场哑火。
+                        val ambientOk = runCatching {
+                            player.startAmbient(
+                                Uri.parse(settings.ambientUri),
+                                settings.ambientVolume / 100f,
+                                settings.ambientStartMs,
+                                settings.ambientEndMs,
+                                loop = !settings.replayEnabled
+                            )
+                            true
+                        }.onFailure {
+                            AppLogger.w(TAG, "副音频起播失败，跳过衬托直接播主音频", it)
+                        }.getOrDefault(false)
+                        if (ambientOk) {
+                            leadJob = serviceScope.launch {
+                                delay(settings.ambientLeadSeconds * 1000L)
+                                startMain(localPath, video, settings, result.source.toLogValue())
+                            }
+                        } else {
                             startMain(localPath, video, settings, result.source.toLogValue())
                         }
                     } else {
@@ -230,6 +269,9 @@ class AlarmService : Service() {
                     playFallback("无可用缓存视频（候选 ${videos.size} 条）")
                 }
                 alarmScheduler.cancelSnoozeOnly()
+            } catch (e: CancellationException) {
+                // 服务销毁导致的正常取消，不算故障，也不该再触发兜底铃声
+                throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "选片/起播异常，进入兜底", e)
                 playFallback("异常: ${e.message ?: e.javaClass.simpleName}")
@@ -256,14 +298,23 @@ class AlarmService : Service() {
     ) {
         if (!ringingGuard.get()) return
         mainStarted = true
-        player.playFile(
-            File(localPath),
-            settings.volumeFadeEnabled,
-            settings.volumeFadeSeconds * 1000L
-        )
-        if (player.isAmbientPlaying) {
-            player.duckAmbient(settings.ambientDuckedVolume / 100f)
+        // O1 加固：起播抛异常不得让本场卡在「有通知无声音」，直接降级到兜底铃声
+        runCatching {
+            player.playFile(
+                File(localPath),
+                settings.volumeFadeEnabled,
+                settings.volumeFadeSeconds * 1000L
+            )
+        }.onFailure {
+            AppLogger.e(TAG, "主音频起播失败，降级兜底", it)
+            playFallback("主音频起播异常: ${it.message ?: it.javaClass.simpleName}")
+            return
         }
+        runCatching {
+            if (player.isAmbientPlaying) {
+                player.duckAmbient(settings.ambientDuckedVolume / 100f)
+            }
+        }.onFailure { AppLogger.w(TAG, "副音频压低失败（不阻断主音频）", it) }
         updateNotificationContent(
             title = video.title.ifBlank { getString(R.string.notif_ring_title) },
             text = getString(R.string.ringing_publish_date_fmt, video.publishDate)
@@ -280,6 +331,11 @@ class AlarmService : Service() {
      * 已试过仍失败或无铃声 URI → 直接进第四级 ToneGenerator 蜂鸣。
      */
     private fun playFallback(reason: String) {
+        // 播放器都还没建起来（或已释放）→ 铃声兜底无从谈起，直奔蜂鸣
+        if (!::player.isInitialized) {
+            playToneFallback(reason)
+            return
+        }
         val alarmUri: Uri? = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         val ringtoneUri = alarmUri ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
         if (ringtoneUri == null || ringtoneAttempted) {
@@ -315,8 +371,21 @@ class AlarmService : Service() {
         }
         toneGenerator = generator
         toneJob = serviceScope.launch {
-            while (isActive) {
-                generator.startTone(ToneGenerator.TONE_PROP_BEEP, Constants.TONE_BEEP_DURATION_MS)
+            var failures = 0
+            while (isActive && failures < TONE_MAX_FAILURES) {
+                // O1 加固：蜂鸣循环里抛异常会让整个响铃链路崩掉（连停止都做不到），
+                // 这里就地吞掉并计数，连续失败才放弃最后防线。
+                val ok = runCatching {
+                    generator.startTone(
+                        ToneGenerator.TONE_PROP_BEEP, Constants.TONE_BEEP_DURATION_MS
+                    )
+                }.onFailure { AppLogger.w(TAG, "蜂鸣失败（第 ${failures + 1} 次）", it) }.isSuccess
+                if (ok) failures = 0 else failures++
+                if (failures >= TONE_MAX_FAILURES) {
+                    AppLogger.e(TAG, "蜂鸣连续失败 $TONE_MAX_FAILURES 次，放弃最后防线")
+                    handleStop()
+                    return@launch
+                }
                 delay(Constants.TONE_BEEP_PERIOD_MS)
             }
         }
@@ -361,9 +430,16 @@ class AlarmService : Service() {
                 }
                 if (path != null && File(path).isFile) {
                     AppLogger.i(TAG, "主音频播完且副音频不在播 → 直接重播主音频")
-                    player.playFile(
-                        File(path), settings.volumeFadeEnabled, settings.volumeFadeSeconds * 1000L
-                    )
+                    runCatching {
+                        player.playFile(
+                            File(path),
+                            settings.volumeFadeEnabled,
+                            settings.volumeFadeSeconds * 1000L
+                        )
+                    }.onFailure {
+                        AppLogger.e(TAG, "重播主音频失败，降级兜底", it)
+                        playFallback("重播异常: ${it.message ?: it.javaClass.simpleName}")
+                    }
                     return@launch
                 }
                 AppLogger.w(TAG, "重播时主音频文件不可用 → 停止本场响铃")
@@ -411,19 +487,29 @@ class AlarmService : Service() {
                 startMain(path, video, settings, lastSourceLogValue)
             } else {
                 AppLogger.i(TAG, "副音频一轮播完 → 自动重播主音频")
-                player.playFile(
-                    File(path), settings.volumeFadeEnabled, settings.volumeFadeSeconds * 1000L
-                )
+                runCatching {
+                    player.playFile(
+                        File(path),
+                        settings.volumeFadeEnabled,
+                        settings.volumeFadeSeconds * 1000L
+                    )
+                }.onFailure {
+                    AppLogger.e(TAG, "副音频结束后重播失败，降级兜底", it)
+                    playFallback("重播异常: ${it.message ?: it.javaClass.simpleName}")
+                }
             }
             if (settings.ambientEnabled && settings.ambientUri.isNotBlank()) {
                 // 以压低音量重启一轮单轮副音频陪衬（主音频在播，无需再 duck）
-                player.startAmbient(
-                    Uri.parse(settings.ambientUri),
-                    settings.ambientDuckedVolume / 100f,
-                    settings.ambientStartMs,
-                    settings.ambientEndMs,
-                    loop = false
-                )
+                // O1 加固：副音频重启失败只影响陪衬，主音频照播，不降级、不中断
+                runCatching {
+                    player.startAmbient(
+                        Uri.parse(settings.ambientUri),
+                        settings.ambientDuckedVolume / 100f,
+                        settings.ambientStartMs,
+                        settings.ambientEndMs,
+                        loop = false
+                    )
+                }.onFailure { AppLogger.w(TAG, "重启一轮副音频失败（主音频不受影响）", it) }
             }
         }
     }
@@ -435,30 +521,31 @@ class AlarmService : Service() {
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
-        player.stopAmbient()
+        runCatching { player.stopAmbient() }.onFailure { AppLogger.w(TAG, "停止副音频失败", it) }
         ringingGuard.set(false)
         ringtoneAttempted = false
+        fallbackEngaged.set(false)
         currentPlayingPath = null
         currentVideo = null
         mainStarted = false
         val gen = sessionSeq
         serviceScope.launch {
             // 渐弱收尾完成后再做收尾登记，避免服务提前退出截断渐弱
-            player.stopWithFadeOut {
-                serviceScope.launch {
-                    // 渐弱期间新响铃已接管 → 本场收尾登记全部让位，不得撤前台/杀服务
-                    if (gen != sessionSeq) return@launch
+            fadeOutThen {
+                // O1 加固：读设置/续期调度任一失败也只记日志，
+                // 用户按下的「停止」必须生效——通知要撤、服务要停。
+                runCatching {
                     val settings = settingsRepository.current()
                     if (settings.alarmEnabled) {
                         // 每日自续期：响完算明天同一时刻再 setExact
                         alarmScheduler.scheduleNextDaily(settings.alarmHour, settings.alarmMinute)
                     }
-                    runCatching { SyncScheduler.scheduleNext(this@AlarmService) }
-                    ServiceCompat.stopForeground(
-                        this@AlarmService, ServiceCompat.STOP_FOREGROUND_REMOVE
-                    )
-                    stopSelf()
+                }.onFailure {
+                    AppLogger.e(TAG, "停止后重新调度失败（下次可能不再响，请重开一次开关）", it)
                 }
+                runCatching { SyncScheduler.scheduleNext(this@AlarmService) }
+                // 渐弱期间新响铃已接管 → 本场收尾登记全部让位，不得撤前台/杀服务
+                finishForeground(gen)
             }
         }
     }
@@ -468,29 +555,59 @@ class AlarmService : Service() {
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
-        player.stopAmbient()
+        runCatching { player.stopAmbient() }.onFailure { AppLogger.w(TAG, "停止副音频失败", it) }
         ringingGuard.set(false)
+        ringtoneAttempted = false
+        fallbackEngaged.set(false)
         currentPlayingPath = null
         currentVideo = null
         mainStarted = false
         val gen = sessionSeq
         serviceScope.launch {
-            val settings = settingsRepository.current()
-            player.stopWithFadeOut {
-                serviceScope.launch {
-                    // 渐弱期间新响铃已接管 → 贪睡仍要注册，但不得撤前台/杀服务
-                    val scheduled = alarmScheduler.scheduleSnooze(settings.snoozeMinutes)
-                    if (!scheduled) {
+            fadeOutThen {
+                // 贪睡注册优先级最高：即便设置读取失败，也要用默认间隔把贪睡排上，
+                // 否则用户等于被静音丢弃。
+                val minutes = runCatching { settingsRepository.current().snoozeMinutes }
+                    .onFailure { AppLogger.e(TAG, "读取贪睡间隔失败，用默认值 ${Constants.SNOOZE_DEFAULT}", it) }
+                    .getOrDefault(Constants.SNOOZE_DEFAULT)
+                runCatching {
+                    if (!alarmScheduler.scheduleSnooze(minutes)) {
                         AppLogger.w(TAG, "贪睡注册无精确闹钟权限，已降级注册")
                     }
-                    if (gen != sessionSeq) return@launch
-                    ServiceCompat.stopForeground(
-                        this@AlarmService, ServiceCompat.STOP_FOREGROUND_REMOVE
-                    )
-                    stopSelf()
-                }
+                }.onFailure { AppLogger.e(TAG, "贪睡注册失败（本次贪睡可能不响）", it) }
+                // 渐弱期间新响铃已接管 → 贪睡已注册，但不得撤前台/杀服务
+                finishForeground(gen)
             }
         }
+    }
+
+    /**
+     * 主音频渐弱收尾后执行 [block]（在 serviceScope 内运行，可调用挂起函数）。
+     * 渐弱本身失败（播放器未初始化/已释放）时立即执行 [block]，
+     * 绝不让服务卡在「前台还在、声音没了」的状态。
+     * [block] 内逸出的异常只记日志，不会再冒泡到协程兜底去重新起铃。
+     */
+    private fun fadeOutThen(block: suspend () -> Unit) {
+        val run: () -> Unit = {
+            serviceScope.launch {
+                runCatching { block() }
+                    .onFailure { AppLogger.e(TAG, "响铃收尾流程异常，已强制收场", it) }
+            }
+        }
+        val started = runCatching {
+            player.stopWithFadeOut(onFinished = run)
+            true
+        }.onFailure { AppLogger.w(TAG, "渐弱收尾不可用，直接收尾", it) }.getOrDefault(false)
+        if (!started) run()
+    }
+
+    /** 撤前台并停止服务；[gen] 与当前会话不符说明新响铃已接管，本场让位 */
+    private fun finishForeground(gen: Int) {
+        if (gen != sessionSeq) return
+        runCatching {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        }.onFailure { AppLogger.w(TAG, "撤前台失败", it) }
+        stopSelf()
     }
 
     /** 停止并释放 ToneGenerator 兜底 */
@@ -541,6 +658,9 @@ class AlarmService : Service() {
 
         /** 缓存为空时的响铃现场同步上限：超时即放弃网络、走兜底铃声（响铃不能久等） */
         private const val RING_SYNC_TIMEOUT_MS = 8_000L
+
+        /** 蜂鸣兜底连续失败上限：达到即放弃，避免无限报错循环 */
+        private const val TONE_MAX_FAILURES = 3
 
         /**
          * 启动响铃服务。
