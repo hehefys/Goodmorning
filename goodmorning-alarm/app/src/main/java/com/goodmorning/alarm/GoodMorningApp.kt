@@ -65,6 +65,9 @@ class GoodMorningApp : Application() {
                 // 响铃音频由 AlarmService 经 USAGE_ALARM 播放，渠道本身必须静音，
                 // 否则通知音会叠加在闹钟音频之上（参考 ClockYou 的做法）
                 setSound(null, null)
+                // 息屏可靠性：锁屏可见 + 免打扰下照样弹出，保证锁屏/息屏时能看见并一键停止
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                setBypassDnd(true)
             }
         )
         nm.createNotificationChannel(

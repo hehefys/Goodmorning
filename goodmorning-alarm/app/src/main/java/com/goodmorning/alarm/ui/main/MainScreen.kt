@@ -251,7 +251,8 @@ fun MainScreen(
                 TextButton(
                     onClick = {
                         showReplayTestDialog = false
-                        AlarmService.start(context, Constants.ACTION_RING)
+                        // force=true：手动测试跳过去重，可连续点按验证
+                        AlarmService.start(context, Constants.ACTION_RING, force = true)
                     }
                 ) {
                     Text(text = stringResource(R.string.btn_confirm))

@@ -86,6 +86,16 @@ object Constants {
     // ===== PendingIntent requestCode =====
     const val REQUEST_CODE_DAILY = 1001
     const val REQUEST_CODE_SNOOZE = 1002
+    /** setAlarmClock 的「展示/编辑闹钟」意图（状态栏闹钟图标点击用） */
+    const val REQUEST_CODE_ALARM_INFO = 1003
+
+    // ===== 到点去重（防重复/叠加/延迟重播） =====
+    /** 到点意图携带的「计划触发时刻」（epoch ms），用于识别同一场闹钟的重复投递 */
+    const val EXTRA_TRIGGER_AT = "trigger_at"
+    /** 手动触发（主页测试键）：跳过去重 */
+    const val EXTRA_FORCE = "force"
+    /** 计划触发时刻差值小于此值即视为同一场闹钟（ms） */
+    const val RING_DEDUPE_WINDOW_MS = 60_000L
 
     // ===== 目录 =====
     const val VIDEO_DIR = "videos"

@@ -14,12 +14,15 @@ import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.goodmorning.alarm.R
 import com.goodmorning.alarm.alarm.AlarmScheduler
+import com.goodmorning.alarm.alarm.RingGuard
+import com.goodmorning.alarm.alarm.RingWakeLock
 import com.goodmorning.alarm.alarm.SelectionPolicy
 import com.goodmorning.alarm.data.db.VideoEntity
 import com.goodmorning.alarm.data.prefs.Settings
@@ -96,22 +99,41 @@ class AlarmService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        player = AlarmPlayer(this).apply {
-            onError = { throwable -> onPlayerError(throwable) }
-            onEnded = { onMainEnded() }
-            onAmbientEnded = { onAmbientEnded() }
-        }
+        // 息屏可靠性①：服务进程一启动就持锁（播放在 ExoPlayer 内另有一层 WAKE_MODE_LOCAL）
+        RingWakeLock.acquire(this, "service")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundCompat()
-
         // START_NOT_STICKY 下系统重建传入 null intent：仅保活不重播
         if (intent == null) {
             AppLogger.w(TAG, "服务重建（null intent），不重播，直接停止")
             stopSelf()
             return START_NOT_STICKY
         }
+
+        // 息屏可靠性②：到点去重兜底（主判重在 AlarmReceiver）。
+        // 控制命令不受影响；重复到点时先补一次前台调用（Android 8+ 要求
+        // startForegroundService 后必须进前台，否则系统会判定启动超时），再安全退出。
+        if (intent.action != Constants.ACTION_STOP && intent.action != Constants.ACTION_SNOOZE) {
+            val triggerAt = intent.getLongExtra(
+                Constants.EXTRA_TRIGGER_AT, System.currentTimeMillis()
+            )
+            // 主页测试键强制触发，不参与去重
+            val force = intent.getBooleanExtra(Constants.EXTRA_FORCE, false)
+            if (force) RingGuard.reset(this)
+            if (!force && !RingGuard.shouldHandle(this, triggerAt)) {
+                AppLogger.w(TAG, "重复到点已忽略（不再重复/叠加播放）：triggerAt=$triggerAt")
+                startForegroundCompat()
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            RingGuard.markHandled(this, triggerAt)
+        }
+
+        // 息屏可靠性③：先占前台（Doze 下必须在系统给的窗口内完成），再建播放器
+        startForegroundCompat()
+        ensurePlayer()
 
         when (intent.action) {
             Constants.ACTION_STOP -> handleStop()
@@ -128,10 +150,24 @@ class AlarmService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * 惰性创建播放器：放在 startForeground 之后，避免 ExoPlayer 初始化耗时
+     * 把「进入前台」挤出系统给 Doze 唤醒的短窗口。
+     */
+    private fun ensurePlayer() {
+        if (::player.isInitialized) return
+        player = AlarmPlayer(this).apply {
+            onError = { throwable -> onPlayerError(throwable) }
+            onEnded = { onMainEnded() }
+            onAmbientEnded = { onAmbientEnded() }
+        }
+    }
+
     override fun onDestroy() {
         stopToneFallback()
         serviceScope.cancel()
-        runCatching { player.release() }
+        if (::player.isInitialized) runCatching { player.release() }
+        RingWakeLock.release()
         super.onDestroy()
     }
 
@@ -148,7 +184,11 @@ class AlarmService : Service() {
 
                 // 缓存为空才现场补救（定时同步被系统杀掉的场景）：
                 // 有缓存则零延迟直接播，同步交给既有的 05:30/21:00 链路更新明天。
-                if (videos.isEmpty()) {
+                // 息屏可靠性④：Doze 下网络被禁，现场同步必然超时（白等 RING_SYNC_TIMEOUT_MS），
+                // 直接跳过并走兜底铃声，避免出现「到点后空等数秒才出声」。
+                if (videos.isEmpty() && isDeviceIdleMode()) {
+                    AppLogger.w(TAG, "缓存为空但设备处于 Doze，跳过现场同步，直接走兜底")
+                } else if (videos.isEmpty()) {
                     val synced = withTimeoutOrNull(RING_SYNC_TIMEOUT_MS) {
                         runCatching { SyncEngine(this@AlarmService).sync() }.getOrNull()
                     }
@@ -195,6 +235,12 @@ class AlarmService : Service() {
                 playFallback("异常: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    /** 设备是否处于 Doze（息屏静置）模式：此时网络不可用，任何联网补救都是白等 */
+    private fun isDeviceIdleMode(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return powerManager?.isDeviceIdleMode == true
     }
 
     /**
@@ -496,9 +542,15 @@ class AlarmService : Service() {
         /** 缓存为空时的响铃现场同步上限：超时即放弃网络、走兜底铃声（响铃不能久等） */
         private const val RING_SYNC_TIMEOUT_MS = 8_000L
 
-        fun start(context: Context, action: String) {
+        /**
+         * 启动响铃服务。
+         * @param force 手动触发（主页测试键）时为 true：跳过到点去重，
+         *              避免连续测试被判重逻辑拦掉（真实闹钟到点一律 false）
+         */
+        fun start(context: Context, action: String, force: Boolean = false) {
             val intent = Intent(context, AlarmService::class.java).apply {
                 this.action = action
+                if (force) putExtra(Constants.EXTRA_FORCE, true)
             }
             ContextCompat.startForegroundService(context, intent)
         }

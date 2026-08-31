@@ -17,6 +17,8 @@
     <!-- 前台服务（媒体播放类型，Android 14+ 必须声明具体类型） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 引导用户将本应用加入电池优化白名单（Doze 下闹钟不被推迟的关键） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- 允许自建 HTTP 数据源明文通信：Android 9+ 默认禁止 cleartext，用户配置的
          RSSHub 地址可能是 http:// IP 形式（如 http://81.70.52.12:1200），需放行 -->
@@ -42,9 +44,12 @@
             </intent-filter>
         </activity>
 
-        <!-- ===== 闹钟到点接收器（精确闹钟触发，允许后台启动前台服务） ===== -->
+        <!-- ===== 闹钟到点接收器（精确闹钟触发，允许后台启动前台服务） =====
+             directBootAware：重启后首次解锁前闹钟也能投递；此时凭据加密存储不可用，
+             选片会失败并自动降级到 ToneGenerator 蜂鸣（绝不哑火） -->
         <receiver
             android:name=".alarm.AlarmReceiver"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="false" />
 
@@ -60,9 +65,11 @@
             </intent-filter>
         </receiver>
 
-        <!-- ===== 响铃前台服务（mediaPlayback 类型） ===== -->
+        <!-- ===== 响铃前台服务（mediaPlayback 类型） =====
+             directBootAware 需与 AlarmReceiver 保持一致，否则解锁前无法启动本服务 -->
         <service
             android:name=".playback.AlarmService"
+            android:directBootAware="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
