@@ -100,11 +100,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         urlInput.value = value
     }
 
-    /** 保存地址（规范化去空白/结尾斜杠） */
+    /** 保存地址（规范化去空白/结尾斜杠）；空输入/无变化则跳过写入，防止意外覆盖为默认值 */
     fun saveRssBaseUrl() {
         viewModelScope.launch {
-            settingsRepository.setRssBaseUrl(urlInput.value)
-            // 保存后立即同步一次校验连通性（P1-2）
+            val normalized = urlInput.value.trim().trimEnd('/')
+            // 空串视为无效输入，不覆盖已保存的自建实例地址
+            if (normalized.isEmpty()) return@launch
+            val current = settingsRepository.current().rsshubBaseUrl
+            if (normalized == current) {
+                // 无实际修改，仅同步校验连通性
+                syncNow()
+                return@launch
+            }
+            settingsRepository.setRssBaseUrl(normalized)
             syncNow()
         }
     }
