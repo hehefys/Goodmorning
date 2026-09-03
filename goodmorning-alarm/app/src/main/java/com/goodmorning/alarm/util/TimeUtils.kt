@@ -45,12 +45,14 @@ object TimeUtils {
     }
 
     /**
-     * 计算下一个同步时刻：05:30 与 21:00 中较近者（严格未来）。
+     * 计算下一个同步时刻：05:30、12:00、21:00 三档中较近者（严格未来）。
+     * 12:00 档覆盖博主上午发布但 05:30 尚未收录的早安视频（改善「早上播的其实是昨天」）。
      */
     fun nextSyncAt(now: Long = System.currentTimeMillis()): Long {
         val morning = nextDailyAt(Constants.SYNC_HOUR_MORNING, Constants.SYNC_MINUTE_MORNING, now)
+        val noon = nextDailyAt(Constants.SYNC_HOUR_NOON, Constants.SYNC_MINUTE_NOON, now)
         val evening = nextDailyAt(Constants.SYNC_HOUR_EVENING, Constants.SYNC_MINUTE_EVENING, now)
-        return minOf(morning, evening)
+        return minOf(morning, noon, evening)
     }
 
     /**

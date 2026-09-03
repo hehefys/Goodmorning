@@ -7,7 +7,7 @@ import org.junit.Test
 /**
  * Constants 契约测试：固化 PRD / ARCHITECTURE.md 中约定的关键参数，
  * 防止后续改动无意偏离产品口径（贪睡 1~30 默认 10、渐强 30%→100% 时长 5~60s 默认 20s、
- * 同步时刻 05:30/21:00、缓存保留 3 条、RSSHub 路由模板）。
+ * 同步时刻 05:30/12:00/21:00、缓存保留 3 条、RSSHub 路由模板）。
  */
 class ConstantsTest {
 
@@ -27,9 +27,11 @@ class ConstantsTest {
     }
 
     @Test
-    fun `同步时刻为0530与2100`() {
+    fun `同步时刻为0530、1200与2100`() {
         assertEquals(5, Constants.SYNC_HOUR_MORNING)
         assertEquals(30, Constants.SYNC_MINUTE_MORNING)
+        assertEquals(12, Constants.SYNC_HOUR_NOON)
+        assertEquals(0, Constants.SYNC_MINUTE_NOON)
         assertEquals(21, Constants.SYNC_HOUR_EVENING)
         assertEquals(0, Constants.SYNC_MINUTE_EVENING)
     }

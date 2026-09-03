@@ -128,6 +128,9 @@
     <string name="settings_rsshub_url_help">公共实例可能因抖音反爬而不稳定，建议自建 RSSHub 后替换此地址</string>
     <string name="settings_btn_save_url">保存并同步</string>
     <string name="settings_btn_restore_default">恢复默认</string>
+    <string name="settings_restore_default_title">确认恢复默认 RSSHub？</string>
+    <string name="settings_restore_default_body">将把数据源地址改回公共实例 https://rsshub.app。已配置的自建实例（如云服务器代理）会被覆盖。确定继续？</string>
+    <string name="settings_restore_default_confirm">确认恢复</string>
     <string name="settings_snooze_label">贪睡间隔</string>
     <string name="settings_snooze_minutes_fmt">%1$d 分钟</string>
     <string name="settings_fade_label">音量渐强</string>

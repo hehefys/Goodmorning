@@ -100,11 +100,24 @@ class SyncEngine(context: Context) {
             )
         }
 
-        // ① 元数据 upsert（按 aweme_id 去重；保留已下载文件的 localPath 等字段）
+        // ① 元数据 upsert（按 aweme_id 去重；保留已下载文件的 localPath 等字段）。
+        // 注意：Room upsert 语义是「存在则全量替换」，直接 upsertAll 会抹掉 localPath/
+        // fileSize/downloadedAt——必须用 mergeExisting 合并旧值（ARCHITECTURE.md §3.1）。
         val existingById = videoDao.getAll().associateBy { it.id }
-        val entities = items.map { item -> mergeExisting(toEntity(item), existingById[item.id]) }
+        val entities = items.mapNotNull { item ->
+            val fresh = toEntity(item)
+            if (fresh.videoUrl.isNullOrBlank()) {
+                AppLogger.w(TAG, "解析条目缺少视频直链，已跳过：${item.id}")
+                null
+            } else {
+                mergeExisting(fresh, existingById[fresh.id])
+            }
+        }
+        if (entities.isEmpty()) {
+            return@withContext finish(false, 0, "PARSE:本次同步无有效视频直链（请确认博主已发布作品）")
+        }
         videoDao.upsertAll(entities)
-        AppLogger.i(TAG, "解析到 ${entities.size} 条视频元数据")
+        AppLogger.i(TAG, "解析到 ${entities.size} 条有效视频元数据")
 
         // ② 下载最新的 N 条（直链有时效，同步后立即下载）
         val targets = entities

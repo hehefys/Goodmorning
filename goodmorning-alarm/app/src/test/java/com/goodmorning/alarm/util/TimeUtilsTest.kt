@@ -83,7 +83,7 @@ class TimeUtilsTest {
         assertEquals(at(2027, 1, 1, 0, 0), TimeUtils.nextDailyAt(0, 0, now))
     }
 
-    // ---- nextSyncAt（05:30 / 21:00 中较近的未来时刻）----
+    // ---- nextSyncAt（05:30 / 12:00 / 21:00 中较近的未来时刻）----
 
     @Test
     fun `凌晨四点取当天0530`() {
@@ -94,18 +94,34 @@ class TimeUtilsTest {
     }
 
     @Test
-    fun `恰在0530整点取当天2100`() {
+    fun `恰在0530整点取当天1200`() {
         assertEquals(
-            at(2026, 8, 27, 21, 0),
+            at(2026, 8, 27, 12, 0),
             TimeUtils.nextSyncAt(at(2026, 8, 27, 5, 30))
         )
     }
 
     @Test
-    fun `上午九点取当天2100`() {
+    fun `上午九点取当天1200`() {
+        assertEquals(
+            at(2026, 8, 27, 12, 0),
+            TimeUtils.nextSyncAt(at(2026, 8, 27, 9, 0))
+        )
+    }
+
+    @Test
+    fun `恰在1200整点取当天2100`() {
         assertEquals(
             at(2026, 8, 27, 21, 0),
-            TimeUtils.nextSyncAt(at(2026, 8, 27, 9, 0))
+            TimeUtils.nextSyncAt(at(2026, 8, 27, 12, 0))
+        )
+    }
+
+    @Test
+    fun `下午一点取当天2100`() {
+        assertEquals(
+            at(2026, 8, 27, 21, 0),
+            TimeUtils.nextSyncAt(at(2026, 8, 27, 13, 0))
         )
     }
 

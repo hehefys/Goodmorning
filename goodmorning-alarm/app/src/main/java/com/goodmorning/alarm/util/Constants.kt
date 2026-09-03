@@ -21,8 +21,12 @@ object Constants {
     const val RSSHUB_ROUTE_TEMPLATE = "%s/douyin/user/%s?embed=1&format=json"
 
     // ===== 同步时刻 =====
+    /** 早晨档：覆盖博主 0~5 点提前发布 */
     const val SYNC_HOUR_MORNING = 5
     const val SYNC_MINUTE_MORNING = 30
+    /** 中午档：覆盖博主上午发布但 05:30 尚未收录的新视频（这是「早上播的还是昨天」的主因之一） */
+    const val SYNC_HOUR_NOON = 12
+    const val SYNC_MINUTE_NOON = 0
     const val SYNC_HOUR_EVENING = 21
     const val SYNC_MINUTE_EVENING = 0
 

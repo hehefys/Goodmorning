@@ -97,6 +97,10 @@ fun SettingsScreen(
     var showBloggerDialog by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf(false)
     }
+    // 恢复默认 RSSHub 确认对话框（防误触：按钮挨着输入框，容易点错）
+    var showRestoreDefaultDialog by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
     // 当前正在键入的时长项（null=无；EDIT_* 见文件底部常量）
     var editingDuration by remember { mutableStateOf<String?>(null) }
 
@@ -215,7 +219,7 @@ fun SettingsScreen(
                         Text(text = stringResource(R.string.settings_btn_save_url))
                     }
                     OutlinedButton(
-                        onClick = { viewModel.restoreDefaultUrl() },
+                        onClick = { showRestoreDefaultDialog = true },
                         shape = ShapeMedium
                     ) {
                         Text(text = stringResource(R.string.settings_btn_restore_default))
@@ -300,6 +304,30 @@ fun SettingsScreen(
                 ) {
                     Text(text = stringResource(R.string.settings_btn_clear_cache))
                 }
+            }
+
+            // 恢复默认 RSSHub 确认对话框（防误触）
+            if (showRestoreDefaultDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRestoreDefaultDialog = false },
+                    title = { Text(text = stringResource(R.string.settings_restore_default_title)) },
+                    text = {
+                        Text(text = stringResource(R.string.settings_restore_default_body))
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showRestoreDefaultDialog = false
+                            viewModel.restoreDefaultUrl()
+                        }) {
+                            Text(text = stringResource(R.string.settings_restore_default_confirm))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRestoreDefaultDialog = false }) {
+                            Text(text = stringResource(R.string.btn_cancel))
+                        }
+                    }
+                )
             }
 
             // ---- 组③ 播放 ----
