@@ -219,7 +219,7 @@ class AlarmService : Service() {
                 var videos = repository.playableVideos()
 
                 // 缓存为空才现场补救（定时同步被系统杀掉的场景）：
-                // 有缓存则零延迟直接播，同步交给既有的 05:30/21:00 链路更新明天。
+                // 有缓存则零延迟直接播，同步交给既有的 05:30/12:00/21:00 链路更新明天。
                 // 息屏可靠性④：Doze 下网络被禁，现场同步必然超时（白等 RING_SYNC_TIMEOUT_MS），
                 // 直接跳过并走兜底铃声，避免出现「到点后空等数秒才出声」。
                 if (videos.isEmpty() && isDeviceIdleMode()) {
@@ -234,57 +234,77 @@ class AlarmService : Service() {
                     videos = repository.playableVideos()
                 }
 
-                val result = selectionPolicy.select(videos, today)
-                val video = result.video
-                val localPath = video?.localPath
-                if (video != null && !localPath.isNullOrBlank() && File(localPath).isFile) {
-                    mainStarted = false
-                    currentPlayingPath = localPath
-                    currentVideo = video
-                    lastSourceLogValue = result.source.toLogValue()
-                    ringtoneAttempted = false
-                    if (settings.ambientEnabled && settings.ambientUri.isNotBlank() &&
-                        settings.ambientLeadSeconds > 0
-                    ) {
-                        // 衬托开启且时长>0：重播开启 → 副音频单轮播完触发重播；
-                        // 重播关闭 → 保持无限循环陪衬。时长=0 表示不衬托，直接走主音频。
-                        // O1 加固：副音频起播失败（文件被删/授权失效）不影响主音频——
-                        // 直接跳过衬托立即起播，绝不因为陪衬没起来就整场哑火。
-                        val ambientOk = runCatching {
-                            player.startAmbient(
-                                Uri.parse(settings.ambientUri),
-                                settings.ambientVolume / 100f,
-                                settings.ambientStartMs,
-                                settings.ambientEndMs,
-                                loop = !settings.replayEnabled
-                            )
-                            true
-                        }.onFailure {
-                            AppLogger.w(TAG, "副音频起播失败，跳过衬托直接播主音频", it)
-                        }.getOrDefault(false)
-                        if (ambientOk) {
-                            leadJob = serviceScope.launch {
-                                delay(settings.ambientLeadSeconds * 1000L)
-                                startMain(localPath, video, settings, result.source.toLogValue())
-                            }
-                        } else {
-                            startMain(localPath, video, settings, result.source.toLogValue())
+                // 缓存里无「当天」视频（博主 00:00 发、RSSHub 抓取有延迟时易发生），
+                // 现场再做一次轻量同步：只下载最新 1~2 条，不重下旧视频。
+                // 同步失败/超时/无网不影响原选片结果——有缓存就播。
+                val firstSource = selectionPolicy.select(videos, today).source
+                if (firstSource != SelectionPolicy.Source.TODAY && !isDeviceIdleMode()) {
+                    AppLogger.i(TAG, "缓存无当天视频（source=$firstSource），响铃现场轻量同步")
+                    val syncedNew = withTimeoutOrNull(RING_RESYNC_TIMEOUT_MS) {
+                        runCatching { SyncEngine(this@AlarmService).syncTopN(n = 2) }.getOrNull()
+                    } ?: false
+                    if (syncedNew) {
+                        videos = repository.playableVideos()
+                        val rerun = selectionPolicy.select(videos, today)
+                        if (rerun.source == SelectionPolicy.Source.TODAY) {
+                            AppLogger.i(TAG, "响铃现场同步拿到当天视频")
                         }
-                    } else {
-                        startMain(localPath, video, settings, result.source.toLogValue())
                     }
-                } else {
-                    playFallback("无可用缓存视频（候选 ${videos.size} 条）")
                 }
-                alarmScheduler.cancelSnoozeOnly()
+                startMainWith(videos, today, settings)
             } catch (e: CancellationException) {
-                // 服务销毁导致的正常取消，不算故障，也不该再触发兜底铃声
                 throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "选片/起播异常，进入兜底", e)
                 playFallback("异常: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    private fun startMainWith(
+        videos: List<VideoEntity>,
+        today: String,
+        settings: Settings
+    ) {
+        val result = selectionPolicy.select(videos, today)
+        val video = result.video
+        val localPath = video?.localPath
+        if (video != null && !localPath.isNullOrBlank() && File(localPath).isFile) {
+            mainStarted = false
+            currentPlayingPath = localPath
+            currentVideo = video
+            lastSourceLogValue = result.source.toLogValue()
+            ringtoneAttempted = false
+            if (settings.ambientEnabled && settings.ambientUri.isNotBlank() &&
+                settings.ambientLeadSeconds > 0
+            ) {
+                val ambientOk = runCatching {
+                    player.startAmbient(
+                        Uri.parse(settings.ambientUri),
+                        settings.ambientVolume / 100f,
+                        settings.ambientStartMs,
+                        settings.ambientEndMs,
+                        loop = !settings.replayEnabled
+                    )
+                    true
+                }.onFailure {
+                    AppLogger.w(TAG, "副音频起播失败，跳过衬托直接播主音频", it)
+                }.getOrDefault(false)
+                if (ambientOk) {
+                    leadJob = serviceScope.launch {
+                        delay(settings.ambientLeadSeconds * 1000L)
+                        startMain(localPath, video, settings, result.source.toLogValue())
+                    }
+                } else {
+                    startMain(localPath, video, settings, result.source.toLogValue())
+                }
+            } else {
+                startMain(localPath, video, settings, result.source.toLogValue())
+            }
+        } else {
+            playFallback("无可用缓存视频（候选 ${videos.size} 条）")
+        }
+        alarmScheduler.cancelSnoozeOnly()
     }
 
     /** 设备是否处于 Doze（息屏静置）模式：此时网络不可用，任何联网补救都是白等 */
@@ -666,6 +686,9 @@ class AlarmService : Service() {
 
         /** 缓存为空时的响铃现场同步上限：超时即放弃网络、走兜底铃声（响铃不能久等） */
         private const val RING_SYNC_TIMEOUT_MS = 8_000L
+
+        /** 缓存非空但无当天视频时的现场轻量同步上限：只补 1~2 条，比空缓存补齐快很多 */
+        private const val RING_RESYNC_TIMEOUT_MS = 12_000L
 
         /** 蜂鸣兜底连续失败上限：达到即放弃，避免无限报错循环 */
         private const val TONE_MAX_FAILURES = 3

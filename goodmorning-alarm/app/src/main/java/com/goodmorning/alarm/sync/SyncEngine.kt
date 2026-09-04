@@ -176,6 +176,70 @@ class SyncEngine(context: Context) {
         return@withContext finish(result.ok, result.availableCount, result.msg)
     }
 
+    /**
+     * 响铃现场用的轻量同步：拉取最新 Feed、只下载 publishTime 较本机最新缓存更新的条目，
+     * 不重下旧视频。返回是否新增了可播放的视频（即当天视频被成功拿下）。
+     *
+     * 与 [sync] 的区别：[sync] 按发布时间全量下载前 N 条（替换/重下都可能发生），
+     * 而本方法只在发现新视频时下载，且不清理旧缓存——避免响铃时把好视频覆盖掉。
+     */
+    suspend fun syncTopN(n: Int): Boolean = withContext(Dispatchers.IO) {
+        val settings = settingsRepository.current()
+        val baseUrl = settings.rsshubBaseUrl.trimEnd('/')
+        val feedUrl = Constants.RSSHUB_ROUTE_TEMPLATE.format(baseUrl, settings.bloggerSecUid)
+        AppLogger.i(TAG, "响铃现场轻量同步（top=$n）：$feedUrl")
+
+        val items = try {
+            fetchAndParse(feedUrl)
+        } catch (e: SyncError) {
+            AppLogger.w(TAG, "响铃现场同步失败：${e.javaClass.simpleName}: ${e.message}")
+            return@withContext false
+        }
+
+        val latestExisting = videoDao.getAll().maxOfOrNull { it.publishTimeMillis } ?: 0L
+        val fresh = items.mapNotNull { item ->
+            val entity = toEntity(item)
+            if (entity.videoUrl.isNullOrBlank()) null else entity
+        }.sortedByDescending { it.publishTimeMillis }.take(n)
+
+        if (fresh.isEmpty() || fresh.all { it.publishTimeMillis <= latestExisting }) {
+            AppLogger.i(TAG, "响铃现场同步无新视频（最新缓存=${latestExisting}ms）")
+            return@withContext false
+        }
+
+        val existingById = videoDao.getAll().associateBy { it.id }
+        val merged = fresh.map { mergeExisting(it, existingById[it.id]) }
+        videoDao.upsertAll(merged)
+
+        var downloaded = 0
+        for (entity in merged) {
+            val path = entity.localPath
+            if (!path.isNullOrBlank() && File(path).isFile) continue
+            val url = entity.videoUrl ?: continue
+            try {
+                val dest = File(
+                    File(appContext.filesDir, Constants.VIDEO_DIR),
+                    "${entity.id}.mp4"
+                )
+                val file = downloader.download(url, dest)
+                videoDao.upsertAll(
+                    listOf(
+                        entity.copy(
+                            localPath = file.absolutePath,
+                            fileSize = file.length(),
+                            downloadedAt = System.currentTimeMillis()
+                        )
+                    )
+                )
+                downloaded++
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "响铃现场下载失败 ${entity.id}: ${e.message}")
+            }
+        }
+        AppLogger.i(TAG, "响铃现场同步完成：新增/下载 $downloaded 条")
+        downloaded > 0
+    }
+
     // ---- 内部实现 ----
 
     /**
