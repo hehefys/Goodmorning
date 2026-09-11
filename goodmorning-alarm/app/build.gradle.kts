@@ -89,6 +89,8 @@ dependencies {
     // Media3 / ExoPlayer
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.common)
+    // androidx.media：MediaSessionCompat + MediaStyle 通知（锁屏媒体大卡）
+    implementation("androidx.media:media:1.7.0")
 
     // 网络
     implementation(libs.okhttp)

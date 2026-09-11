@@ -219,6 +219,19 @@ class AlarmPlayer(private val context: Context) {
 
     val isPlaying: Boolean get() = player.isPlaying
 
+    /** 主播放器当前播放位置（毫秒；未起播/无媒体时 0）——锁屏媒体卡进度条数据源 */
+    fun currentPosition(): Long =
+        runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
+
+    /** 主播放器媒体时长（毫秒；未知/未起播时 0） */
+    fun durationMs(): Long =
+        runCatching { player.duration }.getOrDefault(0L).let { if (it < 0) 0L else it }
+
+    /** 跳转播放位置（毫秒；锁屏/媒体卡进度条拖动用） */
+    fun seekTo(positionMs: Long) {
+        runCatching { player.seekTo(positionMs.coerceAtLeast(0L)) }
+    }
+
     /** 播放本地 mp4 文件（纯音频模式） */
     fun playFile(file: File, fade: Boolean, fadeDurationMs: Long = DEFAULT_FADE_MS) {
         playMedia(Uri.fromFile(file), fade, fadeDurationMs)

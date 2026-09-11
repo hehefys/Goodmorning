@@ -15,6 +15,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -116,10 +119,26 @@ class AlarmService : Service() {
     /** 会话代号：每次新响铃 +1；渐弱收尾回调据此判断是否已被新会话接管 */
     private var sessionSeq = 0
 
+    /** 媒体会话：锁屏媒体大卡 / 系统媒体中心的数据源（响铃期间活跃，岛同款数据标准） */
+    private var mediaSession: MediaSessionCompat? = null
+
+    /** 主音频是否处于暂停（通知「暂停/继续」按钮文案与媒体状态同步用） */
+    @Volatile
+    private var mediaPaused = false
+
+    /** 媒体状态刷新协程：每秒上报播放位置，锁屏进度条由此前进 */
+    private var mediaTickerJob: Job? = null
+
+    /** 最近一次通知标题/文案（暂停/继续重建通知时复用） */
+    private var lastNotifTitle: String? = null
+    private var lastNotifText: String? = null
+
     override fun onCreate() {
         super.onCreate()
         // 息屏可靠性①：服务进程一启动就持锁（播放在 ExoPlayer 内另有一层 WAKE_MODE_LOCAL）
         RingWakeLock.acquire(this, "service")
+        // 媒体会话必须在首次 startForeground 前建好：MediaStyle 通知要拿 sessionToken
+        createMediaSession()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -133,7 +152,9 @@ class AlarmService : Service() {
         // 息屏可靠性②：到点去重（主判重在 AlarmReceiver，此处只兜底）。
         // 控制命令不受影响；确属重复到点时先补一次前台调用（Android 8+ 要求
         // startForegroundService 后必须进前台，否则系统会判定启动超时），再安全退出。
-        if (intent.action != Constants.ACTION_STOP && intent.action != Constants.ACTION_SNOOZE) {
+        if (intent.action != Constants.ACTION_STOP && intent.action != Constants.ACTION_SNOOZE &&
+            intent.action != Constants.ACTION_PLAY_PAUSE
+        ) {
             // 主页测试键强制触发，不参与去重
             val force = intent.getBooleanExtra(Constants.EXTRA_FORCE, false)
             // Receiver 已判过重并带上触发时刻 → 本场身份明确，绝不能再判一次
@@ -173,6 +194,7 @@ class AlarmService : Service() {
         when (intent.action) {
             Constants.ACTION_STOP -> handleStop()
             Constants.ACTION_SNOOZE -> handleSnooze()
+            Constants.ACTION_PLAY_PAUSE -> handlePlayPause()
             else -> {
                 if (ringingGuard.compareAndSet(false, true)) {
                     sessionSeq++
@@ -201,8 +223,13 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         stopToneFallback()
+        mediaTickerJob?.cancel()
         serviceScope.cancel()
         if (::player.isInitialized) runCatching { player.release() }
+        runCatching {
+            mediaSession?.release()
+            mediaSession = null
+        }
         RingWakeLock.release()
         super.onDestroy()
     }
@@ -347,6 +374,22 @@ class AlarmService : Service() {
             title = video.title.ifBlank { getString(R.string.notif_ring_title) },
             text = getString(R.string.ringing_publish_date_fmt, video.publishDate)
         )
+        // 媒体卡元数据：视频标题 + 时长；进度条从主音频起播开始每秒前进
+        runCatching {
+            mediaSession?.setMetadata(
+                MediaMetadataCompat.Builder()
+                    .putString(
+                        MediaMetadataCompat.METADATA_KEY_TITLE,
+                        video.title.ifBlank { getString(R.string.notif_ring_title) }
+                    )
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, getString(R.string.app_name))
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, player.durationMs())
+                    .build()
+            )
+            mediaPaused = false
+            updateMediaState()
+            startMediaTicker()
+        }.onFailure { AppLogger.w(TAG, "媒体卡元数据更新失败（不影响播放）", it) }
         serviceScope.launch {
             runCatching { repository.logPlayback(video.id, sourceLogValue) }
                 .onFailure { AppLogger.w(TAG, "记录播放日志失败", it) }
@@ -542,6 +585,90 @@ class AlarmService : Service() {
         }
     }
 
+    // ---- 媒体会话（锁屏媒体大卡 / 系统媒体中心数据源） ----
+
+    /**
+     * 建媒体会话：onCreate 一次性创建，先于首次 startForeground——
+     * MediaStyle 通知需要 sessionToken。回调把锁屏/耳机的播放控制接到本场响铃。
+     */
+    private fun createMediaSession() {
+        if (mediaSession != null) return
+        mediaSession = MediaSessionCompat(this, "GoodMorningAlarm").apply {
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() { handlePlayPause() }
+                override fun onPause() { handlePlayPause() }
+                override fun onStop() { handleStop() }
+                override fun onSeekTo(pos: Long) {
+                    if (!::player.isInitialized) return
+                    runCatching { player.seekTo(pos) }
+                    updateMediaState()
+                }
+            })
+            setPlaybackState(playbackState())
+            isActive = true
+        }
+    }
+
+    /** 当前媒体播放状态（主播放器位置；衬托期/起播前位置为 0，进度条不定长显示） */
+    private fun playbackState(): PlaybackStateCompat {
+        val paused = mediaPaused
+        return PlaybackStateCompat.Builder()
+            .setActions(
+                PlaybackStateCompat.ACTION_PLAY or
+                    PlaybackStateCompat.ACTION_PAUSE or
+                    PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                    PlaybackStateCompat.ACTION_STOP or
+                    PlaybackStateCompat.ACTION_SEEK_TO
+            )
+            .setState(
+                if (paused) PlaybackStateCompat.STATE_PAUSED else PlaybackStateCompat.STATE_PLAYING,
+                if (::player.isInitialized) player.currentPosition() else 0L,
+                if (paused) 0f else 1f
+            )
+            .build()
+    }
+
+    /** 刷新媒体会话状态（位置/播放态）——锁屏进度条由此前进 */
+    private fun updateMediaState() {
+        runCatching { mediaSession?.setPlaybackState(playbackState()) }
+    }
+
+    /** 每秒刷新一次媒体状态，响铃结束/贪睡时由 [stopMediaTicker] 停止 */
+    private fun startMediaTicker() {
+        mediaTickerJob?.cancel()
+        mediaTickerJob = serviceScope.launch {
+            while (isActive && ringingGuard.get()) {
+                updateMediaState()
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun stopMediaTicker() {
+        mediaTickerJob?.cancel()
+        mediaTickerJob = null
+        mediaPaused = false
+    }
+
+    /**
+     * 暂停/继续（通知按钮、锁屏媒体卡、耳机媒体键的统一入口）。
+     * 仅在主音频已起播后有实际意义；衬托期忽略（副音频陪衬不宜单独暂停）。
+     */
+    private fun handlePlayPause() {
+        if (!ringingGuard.get() || !::player.isInitialized || !mainStarted) return
+        if (mediaPaused) {
+            player.resume()
+            mediaPaused = false
+            AppLogger.i(TAG, "媒体卡操作：继续播放")
+        } else {
+            player.pause()
+            mediaPaused = true
+            AppLogger.i(TAG, "媒体卡操作：暂停播放")
+        }
+        updateMediaState()
+        rebuildRingingNotification()
+    }
+
     // ---- 控制命令 ----
 
     /** 停止本次响铃：副音频即停，主音频 600ms 渐弱收尾后撤通知、注册明天闹钟、补调度同步 */
@@ -549,6 +676,7 @@ class AlarmService : Service() {
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
+        stopMediaTicker()
         runCatching { player.stopAmbient() }.onFailure { AppLogger.w(TAG, "停止副音频失败", it) }
         ringingGuard.set(false)
         ringtoneAttempted = false
@@ -583,6 +711,7 @@ class AlarmService : Service() {
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
+        stopMediaTicker()
         runCatching { player.stopAmbient() }.onFailure { AppLogger.w(TAG, "停止副音频失败", it) }
         ringingGuard.set(false)
         ringtoneAttempted = false
@@ -654,7 +783,7 @@ class AlarmService : Service() {
     // ---- 前台通知（响铃期间的控制面板） ----
 
     private fun startForegroundCompat() {
-        val notification = buildRingingNotification(this)
+        val notification = buildRingingNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceCompat.startForeground(
                 this, Constants.NOTIF_ID_RINGING, notification,
@@ -667,11 +796,68 @@ class AlarmService : Service() {
 
     /** 选片出结果后把视频标题/日期刷进通知（同 ID 覆盖） */
     private fun updateNotificationContent(title: String, text: String) {
+        lastNotifTitle = title
+        lastNotifText = text
         runCatching {
             NotificationManagerCompat.from(this)
-                .notify(Constants.NOTIF_ID_RINGING, buildRingingNotification(this, title, text))
+                .notify(Constants.NOTIF_ID_RINGING, buildRingingNotification(title, text))
         }.onFailure { AppLogger.w(TAG, "更新响铃通知失败", it) }
     }
+
+    /** 暂停/继续后重建通知：按钮文案（暂停⇄继续）与媒体样式同步刷新 */
+    private fun rebuildRingingNotification() {
+        val title = lastNotifTitle ?: getString(R.string.notif_ring_title)
+        val text = lastNotifText ?: getString(R.string.notif_ring_text)
+        runCatching {
+            NotificationManagerCompat.from(this)
+                .notify(Constants.NOTIF_ID_RINGING, buildRingingNotification(title, text))
+        }.onFailure { AppLogger.w(TAG, "重建响铃通知失败", it) }
+    }
+
+    /**
+     * 响铃通知（MediaStyle 媒体样式）：锁屏媒体大卡 + 系统媒体中心由此渲染，
+     * 操作区 = [暂停/继续]（主音频起播后）+ 停止 + 贪睡。
+     * 会话不可用（如 Receiver 抢先补发的兜底通知）时退回大文本样式。
+     */
+    private fun buildRingingNotification(
+        title: String = getString(R.string.notif_ring_title),
+        text: String = getString(R.string.notif_ring_text)
+    ): Notification {
+        val builder = NotificationCompat.Builder(this, Constants.CHANNEL_ALARM)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        if (mainStarted) builder.addAction(buildPauseAction())
+        builder.addAction(buildStopAction(this))
+        builder.addAction(buildSnoozeAction(this))
+        val session = mediaSession
+        if (session != null) {
+            builder.setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session.sessionToken)
+                    .setShowActionsInCompactView(0, 1)
+            )
+        } else {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        }
+        return builder.build()
+    }
+
+    /** 「暂停/继续」按钮：文案与图标随当前播放态切换，统一走 ACTION_PLAY_PAUSE 切换 */
+    private fun buildPauseAction(): NotificationCompat.Action =
+        NotificationCompat.Action.Builder(
+            if (mediaPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
+            getString(if (mediaPaused) R.string.ringing_btn_resume else R.string.ringing_btn_pause),
+            PendingIntent.getService(
+                this, REQUEST_CODE_PLAY_PAUSE,
+                Intent(this, AlarmService::class.java).apply { action = Constants.ACTION_PLAY_PAUSE },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        ).build()
 
     private fun SelectionPolicy.Source.toLogValue(): String = when (this) {
         SelectionPolicy.Source.TODAY -> Constants.SOURCE_TODAY
@@ -683,6 +869,7 @@ class AlarmService : Service() {
         private const val TAG = Constants.TAG_PREFIX + "Service"
         private const val REQUEST_CODE_STOP = 3002
         private const val REQUEST_CODE_SNOOZE = 3003
+        private const val REQUEST_CODE_PLAY_PAUSE = 3004
 
         /** 缓存为空时的响铃现场同步上限：超时即放弃网络、走兜底铃声（响铃不能久等） */
         private const val RING_SYNC_TIMEOUT_MS = 8_000L
@@ -733,7 +920,7 @@ class AlarmService : Service() {
                     return
                 }
                 NotificationManagerCompat.from(context)
-                    .notify(Constants.NOTIF_ID_RINGING, buildRingingNotification(context))
+                    .notify(Constants.NOTIF_ID_RINGING, buildFallbackNotification(context))
                 AppLogger.i(TAG, "已补发高优先级兜底通知（双保险）")
             } catch (e: Exception) {
                 AppLogger.e(TAG, "补发兜底通知失败", e)
@@ -762,7 +949,11 @@ class AlarmService : Service() {
                 )
             ).build()
 
-        private fun buildRingingNotification(
+        /**
+         * 兜底通知（Receiver 抢先补发用，大文本样式）：
+         * 服务 onCreate 建好媒体会话后，startForeground 会以 MediaStyle 同 ID 无缝接管。
+         */
+        private fun buildFallbackNotification(
             context: Context,
             title: String = context.getString(R.string.notif_ring_title),
             text: String = context.getString(R.string.notif_ring_text)
