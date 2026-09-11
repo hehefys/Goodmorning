@@ -29,6 +29,11 @@ object Constants {
     const val SYNC_MINUTE_NOON = 0
     const val SYNC_HOUR_EVENING = 21
     const val SYNC_MINUTE_EVENING = 0
+    /**
+     * 脏数据护栏容忍度：上游最新发布时间比本地缓存最新还旧超过此值即拒绝写入。
+     * 实测 dyproxy 对无效/拉取失败的账号会兜底返回另一账号的旧缓存（最新 2025-09-10）。
+     */
+    const val SYNC_STALE_FEED_TOLERANCE_MS = 24 * 60 * 60_000L
 
     // ===== 缓存与贪睡 =====
     /** 本地缓存保留条数 */

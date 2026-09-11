@@ -116,8 +116,34 @@ class SyncEngine(context: Context) {
         if (entities.isEmpty()) {
             return@withContext finish(false, 0, "PARSE:本次同步无有效视频直链（请确认博主已发布作品）")
         }
+
+        // 防脏数据护栏（实测服务器地雷）：dyproxy 对无效/拉取失败的账号会兜底返回
+        // 另一账号的旧缓存（无效 sec_uid 返回 2023~2025 年游戏视频，HTTP 200）。
+        // 若拉到的最新发布时间比本地缓存最新还旧超过容忍度 → 判定错误数据，
+        // 拒绝写入并保留现有缓存；待上游恢复（出现更新的视频）后自动自愈。
+        val localNewest = existingById.values.maxOfOrNull { it.publishTimeMillis } ?: 0L
+        val incomingNewest = entities.maxOfOrNull { it.publishTimeMillis } ?: 0L
+        if (localNewest > 0 &&
+            incomingNewest < localNewest - Constants.SYNC_STALE_FEED_TOLERANCE_MS
+        ) {
+            AppLogger.e(
+                TAG,
+                "上游返回可疑数据，已拒绝写入：拉取最新=${TimeUtils.formatShort(incomingNewest)} " +
+                    "早于本地最新=${TimeUtils.formatShort(localNewest)}"
+            )
+            return@withContext finish(
+                false, 0,
+                "PARSE:上游返回异常数据（最新发布时间早于本地缓存），已保留现有缓存"
+            )
+        }
+
         videoDao.upsertAll(entities)
-        AppLogger.i(TAG, "解析到 ${entities.size} 条有效视频元数据")
+        val newestEntity = entities.maxByOrNull { it.publishTimeMillis }
+        AppLogger.i(
+            TAG,
+            "解析到 ${entities.size} 条有效视频元数据（最新：「" +
+                "${newestEntity?.title?.take(24)}」${TimeUtils.formatShort(newestEntity?.publishTimeMillis ?: 0L)}）"
+        )
 
         // ② 下载最新的 N 条（直链有时效，同步后立即下载）
         val targets = entities
