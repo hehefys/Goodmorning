@@ -172,7 +172,8 @@
     <string name="notif_channel_sync_name">后台同步</string>
     <string name="notif_channel_sync_desc">视频缓存同步的结果通知（低打扰）</string>
     <string name="notif_ring_title">早安时间到</string>
-    <string name="notif_ring_text">点击查看响铃页面</string>
+    <string name="notif_ring_text">响铃中</string>
+    <string name="notif_snooze_stay_text">稍后提醒中，到点再叫你</string>
     <string name="notif_action_stop">停止</string>
 
     <!-- ===== 通用 ===== -->

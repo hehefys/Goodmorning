@@ -195,11 +195,16 @@ class AlarmService : Service() {
             Constants.ACTION_STOP -> handleStop()
             Constants.ACTION_SNOOZE -> handleSnooze()
             Constants.ACTION_PLAY_PAUSE -> handlePlayPause()
+            Constants.ACTION_REPOST_NOTIF -> handleRepostNotification()
             else -> {
                 if (ringingGuard.compareAndSet(false, true)) {
                     sessionSeq++
                     fallbackEngaged.set(false)
                     selectAndPlay()
+                } else if (intent.getBooleanExtra(Constants.EXTRA_FORCE, false)) {
+                    // 测试键打断进行中的响铃：旧测试场直接杀掉，立即开新一场
+                    // （陈年反馈：以前必须先手动关掉上一场才能测下一场）
+                    forceRestartSession()
                 } else {
                     AppLogger.i(TAG, "重复 ACTION_RING 到达，忽略（已在响铃）")
                 }
@@ -241,6 +246,14 @@ class AlarmService : Service() {
     private fun selectAndPlay() {
         serviceScope.launch {
             try {
+                // 贪睡驻留通知清场：新一场响铃开始后不再需要
+                NotificationManagerCompat.from(this@AlarmService)
+                    .cancel(Constants.NOTIF_ID_SNOOZE_STAY)
+                // 媒体会话重新激活（上一场停止时已置 STATE_NONE + 失活）
+                runCatching {
+                    mediaSession?.isActive = true
+                    updateMediaState()
+                }
                 val settings = settingsRepository.current()
                 val today = TimeUtils.localDate()
                 var videos = repository.playableVideos()
@@ -633,11 +646,31 @@ class AlarmService : Service() {
         runCatching { mediaSession?.setPlaybackState(playbackState()) }
     }
 
-    /** 每秒刷新一次媒体状态，响铃结束/贪睡时由 [stopMediaTicker] 停止 */
+    /** 每秒刷新一次媒体状态；时长解析完成后补写元数据（修复进度条 00:00/00:00） */
     private fun startMediaTicker() {
         mediaTickerJob?.cancel()
         mediaTickerJob = serviceScope.launch {
+            var writtenDuration = 0L
             while (isActive && ringingGuard.get()) {
+                val dur = if (::player.isInitialized) player.durationMs() else 0L
+                if (dur > 0 && dur != writtenDuration) {
+                    writtenDuration = dur
+                    runCatching {
+                        mediaSession?.setMetadata(
+                            MediaMetadataCompat.Builder()
+                                .putString(
+                                    MediaMetadataCompat.METADATA_KEY_TITLE,
+                                    lastNotifTitle ?: getString(R.string.notif_ring_title)
+                                )
+                                .putString(
+                                    MediaMetadataCompat.METADATA_KEY_ARTIST,
+                                    getString(R.string.app_name)
+                                )
+                                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, dur)
+                                .build()
+                        )
+                    }
+                }
                 updateMediaState()
                 delay(1_000L)
             }
@@ -648,6 +681,17 @@ class AlarmService : Service() {
         mediaTickerJob?.cancel()
         mediaTickerJob = null
         mediaPaused = false
+        // 会话置停止态并失活：否则系统媒体中心/锁屏会持续驻留上一场的媒体卡
+        // （用户反馈：打开 App 后媒体卡常驻通知栏）
+        runCatching {
+            mediaSession?.setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setActions(PlaybackStateCompat.ACTION_STOP)
+                    .setState(PlaybackStateCompat.STATE_NONE, 0L, 0f)
+                    .build()
+            )
+            mediaSession?.isActive = false
+        }
     }
 
     /**
@@ -670,6 +714,43 @@ class AlarmService : Service() {
     }
 
     // ---- 控制命令 ----
+
+    /**
+     * 测试键打断进行中的响铃：立即终止旧测试场并开新一场。
+     * 不走 handleStop 的收尾登记（不注册明天闹钟/不排同步）——测试场与真实调度无关，
+     * 新一场结束时的 handleStop 会统一处理。
+     */
+    private fun forceRestartSession() {
+        AppLogger.i(TAG, "测试键打断当前响铃 → 强制重开新一场")
+        stopToneFallback()
+        leadJob?.cancel()
+        leadJob = null
+        stopMediaTicker()
+        if (::player.isInitialized) {
+            runCatching { player.stopAmbient() }
+            runCatching { player.stop() }
+        }
+        mainStarted = false
+        mediaPaused = false
+        currentPlayingPath = null
+        currentVideo = null
+        ringtoneAttempted = false
+        fallbackEngaged.set(false)
+        sessionSeq++            // 旧场任何残留回调全部让位
+        ringingGuard.set(true)
+        selectAndPlay()
+    }
+
+    /**
+     * 响铃通知被划掉（暂停态下系统允许清除 MediaStyle）：
+     * 只要还在响铃就立即重建控制面板——响铃场绝不能失去控制入口
+     * （用户反馈：划掉后只能杀应用才能关闹钟）。
+     */
+    private fun handleRepostNotification() {
+        if (!ringingGuard.get()) return
+        AppLogger.i(TAG, "通知被清除 → 重建响铃控制面板")
+        rebuildRingingNotification()
+    }
 
     /** 停止本次响铃：副音频即停，主音频 600ms 渐弱收尾后撤通知、注册明天闹钟、补调度同步 */
     private fun handleStop() {
@@ -732,6 +813,8 @@ class AlarmService : Service() {
                         AppLogger.w(TAG, "贪睡注册无精确闹钟权限，已降级注册")
                     }
                 }.onFailure { AppLogger.e(TAG, "贪睡注册失败（本次贪睡可能不响）", it) }
+                // 贪睡驻留通知：锁屏/通知栏可见下次响铃时刻（对齐小米原生「闹钟再响」驻留）
+                showSnoozeStay(System.currentTimeMillis() + minutes * 60_000L)
                 // 渐弱期间新响铃已接管 → 贪睡已注册，但不得撤前台/杀服务
                 finishForeground(gen)
             }
@@ -765,6 +848,31 @@ class AlarmService : Service() {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         }.onFailure { AppLogger.w(TAG, "撤前台失败", it) }
         stopSelf()
+    }
+
+    /**
+     * 贪睡驻留通知：显示下次响铃时刻，回笼觉时锁屏可见（对齐小米原生「闹钟再响」驻留）。
+     * 非 ongoing 可滑动清除（不影响真正的贪睡闹钟）；贪睡到点的新一场开始时自动撤掉。
+     */
+    private fun showSnoozeStay(wakeAt: Long) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+            val notif = NotificationCompat.Builder(this, Constants.CHANNEL_ALARM)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(TimeUtils.formatHm(wakeAt))
+                .setContentText(getString(R.string.notif_snooze_stay_text))
+                .setOngoing(false)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setOnlyAlertOnce(true)
+                .build()
+            NotificationManagerCompat.from(this).notify(Constants.NOTIF_ID_SNOOZE_STAY, notif)
+        }.onFailure { AppLogger.w(TAG, "贪睡驻留通知发送失败", it) }
     }
 
     /** 停止并释放 ToneGenerator 兜底 */
@@ -831,6 +939,15 @@ class AlarmService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            // 暂停态下系统允许用户划掉媒体通知：划掉立即重建，响铃场不能失去控制入口
+            .setDeleteIntent(
+                PendingIntent.getService(
+                    this, REQUEST_CODE_REPOST,
+                    Intent(this, AlarmService::class.java)
+                        .apply { action = Constants.ACTION_REPOST_NOTIF },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
         if (mainStarted) builder.addAction(buildPauseAction())
         builder.addAction(buildStopAction(this))
         builder.addAction(buildSnoozeAction(this))
@@ -870,6 +987,7 @@ class AlarmService : Service() {
         private const val REQUEST_CODE_STOP = 3002
         private const val REQUEST_CODE_SNOOZE = 3003
         private const val REQUEST_CODE_PLAY_PAUSE = 3004
+        private const val REQUEST_CODE_REPOST = 3005
 
         /** 缓存为空时的响铃现场同步上限：超时即放弃网络、走兜底铃声（响铃不能久等） */
         private const val RING_SYNC_TIMEOUT_MS = 8_000L

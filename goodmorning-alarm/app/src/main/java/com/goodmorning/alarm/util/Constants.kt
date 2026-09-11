@@ -84,6 +84,8 @@ object Constants {
     const val ACTION_STOP = "com.goodmorning.alarm.action.STOP"
     const val ACTION_SNOOZE = "com.goodmorning.alarm.action.SNOOZE"
     const val ACTION_PLAY_PAUSE = "com.goodmorning.alarm.action.PLAY_PAUSE"
+    /** 响铃通知被用户划掉：还在响铃时立即重建控制面板 */
+    const val ACTION_REPOST_NOTIF = "com.goodmorning.alarm.action.REPOST_NOTIF"
 
     // ===== 通知 =====
     // v2：渠道创建后声音设置不可变；响铃音频由服务经 USAGE_ALARM 播放，
@@ -91,6 +93,8 @@ object Constants {
     const val CHANNEL_ALARM = "alarm_channel_v2"
     const val CHANNEL_SYNC = "sync_channel"
     const val NOTIF_ID_RINGING = 2001
+    /** 贪睡驻留通知（显示下次响铃时刻，可滑动清除；真正响铃时撤掉） */
+    const val NOTIF_ID_SNOOZE_STAY = 2003
 
     // ===== PendingIntent requestCode =====
     const val REQUEST_CODE_DAILY = 1001

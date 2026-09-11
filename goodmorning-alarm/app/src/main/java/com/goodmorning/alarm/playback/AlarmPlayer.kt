@@ -246,10 +246,13 @@ class AlarmPlayer(private val context: Context) {
         // 只取消协程、保留 fadeWindow：resume 时按剩余窗口重建渐强（E1）
         fadeJob?.cancel()
         player.pause()
+        // 媒体卡「暂停」= 整场暂停：副音频陪衬一并暂停，而不是只停主音频
+        runCatching { ambientPlayer?.pause() }
     }
 
     fun resume() {
         player.play()
+        runCatching { ambientPlayer?.play() }
         resumeVolumeFadeIfNeeded()
     }
 
