@@ -18,6 +18,15 @@ object TimeUtils {
     fun localDate(millis: Long = System.currentTimeMillis()): String =
         synchronized(dateOnlyFormat) { dateOnlyFormat.format(Date(millis)) }
 
+    /**
+     * 本地时区自然日 date（yyyy-MM-dd）00:00 的 epoch 毫秒。
+     * 供选片规则计算「前一晚傍晚」边界（博主固定在前夜发布次日早安视频）。
+     * 解析失败返回 0（调用方须把 0 视为「无法判定」而跳过相关规则）。
+     */
+    fun startOfDayMillis(date: String): Long = synchronized(dateOnlyFormat) {
+        runCatching { dateOnlyFormat.parse(date)?.time }.getOrNull() ?: 0L
+    }
+
     /** HH:mm */
     fun formatHm(millis: Long = System.currentTimeMillis()): String =
         synchronized(hourMinuteFormat) { hourMinuteFormat.format(Date(millis)) }

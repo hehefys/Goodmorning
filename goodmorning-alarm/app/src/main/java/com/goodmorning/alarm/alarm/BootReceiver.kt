@@ -45,7 +45,14 @@ class BootReceiver : BroadcastReceiver() {
                 } else {
                     AppLogger.i(TAG, "闹钟未开启，跳过重注册")
                 }
-                SyncScheduler.scheduleNext(appContext)
+                // 开机恢复（KEEP）：WorkManager 任务跨重启持久，保留待执行的同步伐链；
+                // 时间被手动修改（REPLACE）：旧任务的目标时刻基于错误时钟，必须重算。
+                val policy = if (action == Intent.ACTION_TIME_CHANGED) {
+                    androidx.work.ExistingWorkPolicy.REPLACE
+                } else {
+                    androidx.work.ExistingWorkPolicy.KEEP
+                }
+                SyncScheduler.scheduleNext(appContext, policy)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "重启恢复失败", e)
             } finally {

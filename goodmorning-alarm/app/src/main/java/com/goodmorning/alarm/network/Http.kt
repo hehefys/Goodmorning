@@ -14,12 +14,17 @@ import java.util.concurrent.TimeUnit
  */
 object Http {
 
-    /** RSSHub 拉取客户端：连接 15s / 读 30s */
+    /**
+     * RSSHub 拉取客户端：连接 15s / 读 30s / 整次调用 45s 封顶。
+     * callTimeout 是总闸：readTimeout 只管单次 read 间隔，代理半开连接滴字节时
+     * 整个同步可能无限拖延（实测 12:01 同步发起后无「同步结束」日志直到进程被杀）。
+     */
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(45, TimeUnit.SECONDS)
             .build()
     }
 

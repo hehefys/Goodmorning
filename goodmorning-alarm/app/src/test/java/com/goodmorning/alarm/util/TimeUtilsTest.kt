@@ -28,6 +28,18 @@ class TimeUtilsTest {
     }
 
     @Test
+    fun `startOfDayMillis返回当地零点`() {
+        val start = TimeUtils.startOfDayMillis("2026-08-27")
+        assertEquals(at(2026, 8, 27, 0, 0), start)
+    }
+
+    @Test
+    fun `startOfDayMillis解析失败返回0`() {
+        assertEquals(0L, TimeUtils.startOfDayMillis("not-a-date"))
+        assertEquals(0L, TimeUtils.startOfDayMillis(""))
+    }
+
+    @Test
     fun `localDate零点与2359属于同一天`() {
         val start = at(2026, 1, 5, 0, 0, 0, 0)
         val end = at(2026, 1, 5, 23, 59, 59, 999)
