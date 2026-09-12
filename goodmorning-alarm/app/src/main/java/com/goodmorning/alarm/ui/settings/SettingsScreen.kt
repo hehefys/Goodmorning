@@ -712,6 +712,34 @@ fun SettingsScreen(
         )
     }
 
+    // ---- 历史博主切换确认对话框（切换会清缓存重同步） ----
+    pendingHistorySwitch?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingHistorySwitch = null },
+            title = { Text(text = stringResource(R.string.settings_blogger_switch_confirm_title)) },
+            text = {
+                Text(
+                    text = stringResource(
+                        R.string.settings_blogger_switch_confirm_body, entry.name
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingHistorySwitch = null
+                    viewModel.switchToHistoryBlogger(entry)
+                }) {
+                    Text(text = stringResource(R.string.btn_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingHistorySwitch = null }) {
+                    Text(text = stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
+
     // ---- 更换博主对话框（DESIGN-V2 §3.1.3） ----
     if (showBloggerDialog) {
         val bloggerState by viewModel.bloggerUiState.collectAsState()
