@@ -14,9 +14,14 @@ import com.goodmorning.alarm.util.TimeUtils
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /** 顶层 DataStore 单例（同一文件只允许一个实例） */
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+
+/** 博主历史 JSON 编解码 */
+private val bloggerJson = Json { ignoreUnknownKeys = true }
 
 /**
  * DataStore Preferences 封装：暴露 [Settings] Flow 与 suspend setter。
@@ -55,6 +60,8 @@ class SettingsRepository(private val context: Context) {
         val BLOGGER_NAME = stringPreferencesKey("blogger_name")
         /** 上一次同步时使用的博主 sec_uid（SyncEngine 判断「换博主→清缓存」） */
         val LAST_BLOGGER_SEC_UID = stringPreferencesKey("last_blogger_sec_uid")
+        /** 博主历史（JSON 数组，最新在前，最多 6 条） */
+        val BLOGGER_HISTORY = stringPreferencesKey("blogger_history")
     }
 
     /** 当前设置（带默认值兜底，读取失败/缺省均回落到 [Settings] 默认） */
@@ -206,12 +213,32 @@ class SettingsRepository(private val context: Context) {
     // ---- V2 博主维度 ----
 
     /**
-     * 更换博主：同时写入 sec_uid 与展示名（原子写入，供设置页博主对话框调用）。
+     * 更换博主：同时写入 sec_uid 与展示名（原子写入，供设置页博主对话框调用），
+     * 并把该博主记入历史（供历史列表快速切换）。
      */
     suspend fun setBlogger(secUid: String, name: String) {
         context.dataStore.edit {
             it[Keys.BLOGGER_SEC_UID] = secUid
             it[Keys.BLOGGER_NAME] = name
+        }
+        addBloggerHistory(secUid, name)
+    }
+
+    /** 博主历史：最近使用过的博主，最新在前 */
+    val bloggerHistory: Flow<List<BloggerEntry>> = context.dataStore.data.map { prefs ->
+        runCatching {
+            bloggerJson.decodeFromString<List<BloggerEntry>>(prefs[Keys.BLOGGER_HISTORY] ?: "[]")
+        }.getOrDefault(emptyList())
+    }
+
+    /** 记入博主历史：按 secUid 去重、最新在前、最多保留 6 条 */
+    private suspend fun addBloggerHistory(secUid: String, name: String) {
+        context.dataStore.edit { prefs ->
+            val current = runCatching {
+                bloggerJson.decodeFromString<List<BloggerEntry>>(prefs[Keys.BLOGGER_HISTORY] ?: "[]")
+            }.getOrDefault(emptyList()).filterNot { it.secUid == secUid }
+            val updated = listOf(BloggerEntry(secUid, name, System.currentTimeMillis())) + current
+            prefs[Keys.BLOGGER_HISTORY] = bloggerJson.encodeToString(updated.take(6))
         }
     }
 

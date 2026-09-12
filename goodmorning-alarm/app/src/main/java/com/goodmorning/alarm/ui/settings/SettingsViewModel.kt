@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.goodmorning.alarm.R
+import com.goodmorning.alarm.data.prefs.BloggerEntry
 import com.goodmorning.alarm.data.prefs.Settings
 import com.goodmorning.alarm.data.prefs.SettingsRepository
 import com.goodmorning.alarm.data.repo.BloggerValidator
@@ -88,6 +89,37 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     /** 博主对话框对外状态（输入 + 流程状态） */
     val bloggerUiState: StateFlow<BloggerUiState> = bloggerState
     val bloggerInputValue: StateFlow<String> = bloggerInput
+
+    /** 博主历史（最近使用过，最新在前），供设置页快速切换 */
+    val bloggerHistory: StateFlow<List<BloggerEntry>> = settingsRepository.bloggerHistory
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 从历史快速切换博主：校验可达性 → 保存（自动记历史）→ toast → 自动重同步。
+     * 服务器未返回展示名（回退 secUid 前缀）时沿用历史里已知的名字。
+     */
+    fun switchToHistoryBlogger(entry: BloggerEntry) {
+        if (bloggerState.value is BloggerUiState.Validating) return
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            bloggerValidator.validate(entry.secUid).fold(
+                onSuccess = { info ->
+                    val name = if (info.name.endsWith("…") && !entry.name.endsWith("…")) {
+                        entry.name
+                    } else {
+                        info.name
+                    }
+                    settingsRepository.setBlogger(info.secUid, name)
+                    toastMessage.value = app.getString(R.string.blogger_switch_ok_fmt, name)
+                    syncNow()
+                },
+                onFailure = { e ->
+                    toastMessage.value =
+                        app.getString(R.string.blogger_validate_fail_fmt, describeError(e))
+                }
+            )
+        }
+    }
 
     init {
         refreshCacheBytes()

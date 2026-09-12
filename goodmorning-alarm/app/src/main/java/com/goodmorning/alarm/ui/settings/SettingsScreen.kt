@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -28,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -63,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.goodmorning.alarm.R
+import com.goodmorning.alarm.data.prefs.BloggerEntry
 import com.goodmorning.alarm.ui.theme.ErrorBadge
 import com.goodmorning.alarm.ui.theme.Ink60
 import com.goodmorning.alarm.ui.theme.Ink900
@@ -75,7 +78,12 @@ import com.goodmorning.alarm.ui.theme.Success
 import com.goodmorning.alarm.ui.theme.Sunrise100
 import com.goodmorning.alarm.ui.theme.Sunrise700
 import com.goodmorning.alarm.ui.theme.SunriseSurface
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 设置页（DESIGN-V2 §2.3 分组卡片重构）：
@@ -100,6 +108,29 @@ fun SettingsScreen(
     // 恢复默认 RSSHub 确认对话框（防误触：按钮挨着输入框，容易点错）
     var showRestoreDefaultDialog by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf(false)
+    }
+    // 历史博主快速切换确认对话框
+    var pendingHistorySwitch by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<BloggerEntry?>(null)
+    }
+    // 运行日志多选导出对话框
+    var showLogExportDialog by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    var logFiles by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<List<File>>(emptyList())
+    }
+    androidx.compose.runtime.LaunchedEffect(showLogExportDialog) {
+        if (showLogExportDialog) {
+            logFiles = withContext(Dispatchers.IO) {
+                val dir = File(context.filesDir, com.goodmorning.alarm.util.Constants.LOG_DIR)
+                dir.listFiles()
+                    ?.filter { it.isFile }
+                    ?.sortedByDescending { it.lastModified() }
+                    ?.take(10)
+                    ?: emptyList()
+            }
+        }
     }
     // 当前正在键入的时长项（null=无；EDIT_* 见文件底部常量）
     var editingDuration by remember { mutableStateOf<String?>(null) }
@@ -184,6 +215,53 @@ fun SettingsScreen(
                     style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
                     color = Ink60
                 )
+
+                // 历史博主：一键来回切换（不含当前博主）
+                val historyList by viewModel.bloggerHistory.collectAsState()
+                val historyOthers = historyList.filter { it.secUid != uiState.settings.bloggerSecUid }
+                if (historyOthers.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_blogger_history_label),
+                        style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
+                        color = Ink60
+                    )
+                    historyOthers.take(4).forEach { entry ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { pendingHistorySwitch = entry }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.History,
+                                contentDescription = null,
+                                tint = Ink60,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = entry.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Ink900
+                                )
+                                Text(
+                                    text = entry.secUid.take(12) + "…",
+                                    style = TextStyle(fontSize = 11.sp),
+                                    color = Ink60
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Ink60,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
             }
 
             // ---- 组② 数据源 ----
@@ -304,6 +382,18 @@ fun SettingsScreen(
                 ) {
                     Text(text = stringResource(R.string.settings_btn_clear_cache))
                 }
+            }
+
+            // 运行日志多选导出对话框
+            if (showLogExportDialog) {
+                LogExportDialog(
+                    files = logFiles,
+                    onDismiss = { showLogExportDialog = false },
+                    onExport = { selected ->
+                        showLogExportDialog = false
+                        exportLogs(context, selected)
+                    }
+                )
             }
 
             // 恢复默认 RSSHub 确认对话框（防误触）
@@ -555,7 +645,7 @@ fun SettingsScreen(
                 AboutRow(
                     icon = Icons.AutoMirrored.Filled.Send,
                     label = stringResource(R.string.settings_export_logs),
-                    onClick = { exportLatestLog(context) }
+                    onClick = { showLogExportDialog = true }
                 )
                 // 条目 4：版本
                 Row(
@@ -907,24 +997,108 @@ private fun formatSecondsText(seconds: Int): String =
         stringResource(R.string.ambient_lead_sec_fmt, seconds)
     }
 
-/** 分享最新的日志文件（filesDir/logs/ 按 namesorted 最新一份）；无日志时静默返回 */
-private fun exportLatestLog(context: android.content.Context) {
-    val logDir = java.io.File(
-        context.filesDir, com.goodmorning.alarm.util.Constants.LOG_DIR
+/**
+ * 运行日志多选导出对话框：列出最近日志（新→旧），勾选任意几份一次性分享。
+ */
+@Composable
+private fun LogExportDialog(
+    files: List<File>,
+    onDismiss: () -> Unit,
+    onExport: (List<File>) -> Unit
+) {
+    val selected = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateMapOf<File, Boolean>()
+    }
+    androidx.compose.runtime.LaunchedEffect(files) {
+        files.firstOrNull()?.let { selected[it] = true }
+    }
+    val dateFmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
+    val hasSelection = selected.containsValue(true)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.settings_log_export_title)) },
+        text = {
+            if (files.isEmpty()) {
+                Text(text = stringResource(R.string.settings_log_export_empty))
+            } else {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_log_export_hint),
+                        style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
+                        color = Ink60
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    files.forEach { file ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selected[file] = !(selected[file] ?: false)
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = selected[file] == true,
+                                onCheckedChange = { selected[file] = it }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = file.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Ink900
+                                )
+                                Text(
+                                    text = dateFmt.format(Date(file.lastModified())) +
+                                        " · " + file.length() / 1024 + " KB",
+                                    style = TextStyle(fontSize = 11.sp),
+                                    color = Ink60
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onExport(selected.filter { it.value }.keys.toList())
+                    onDismiss()
+                },
+                enabled = files.isNotEmpty() && hasSelection
+            ) {
+                Text(text = stringResource(R.string.settings_log_export_btn))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(R.string.btn_cancel))
+            }
+        }
     )
-    val latest = logDir.listFiles()?.maxByOrNull { it.lastModified() } ?: return
-    val uri = androidx.core.content.FileProvider.getUriForFile(
-        context, "${context.packageName}.fileprovider", latest
+}
+
+/** 多选日志分享（FileProvider 授权只读，ACTION_SEND_MULTIPLE 一次带走） */
+private fun exportLogs(context: android.content.Context, files: List<File>) {
+    if (files.isEmpty()) return
+    val uris = ArrayList(
+        files.map {
+            androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", it
+            )
+        }
     )
-    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
         type = "text/plain"
-        putExtra(android.content.Intent.EXTRA_STREAM, uri)
-        putExtra(android.content.Intent.EXTRA_SUBJECT, latest.name)
+        putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "每日早安 运行日志")
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     runCatching {
-        context.startActivity(
-            android.content.Intent.createChooser(send, latest.name)
-        )
+        context.startActivity(android.content.Intent.createChooser(send, "发送运行日志"))
     }
 }

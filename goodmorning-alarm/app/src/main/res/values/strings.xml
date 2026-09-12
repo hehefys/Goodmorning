@@ -44,6 +44,9 @@
     <string name="settings_blogger_title">博主管理</string>
     <string name="settings_blogger_current">当前博主</string>
     <string name="settings_blogger_change">更换博主</string>
+    <string name="settings_blogger_history_label">历史博主（点击快速切换）</string>
+    <string name="settings_blogger_switch_confirm_title">切换博主？</string>
+    <string name="settings_blogger_switch_confirm_body">切换到「%1$s」将清空当前缓存并重新同步，之后的闹钟将播放该博主的内容。</string>
     <string name="settings_blogger_help">更换后将清空旧缓存并立即同步</string>
     <string name="blogger_dialog_title">更换博主</string>
     <string name="blogger_dialog_desc">粘贴博主抖音主页链接，或直接粘贴 sec_uid</string>
@@ -59,6 +62,10 @@
     <string name="settings_group_about">关于</string>
     <string name="settings_usage_guide">使用说明</string>
     <string name="settings_export_logs">导出运行日志</string>
+    <string name="settings_log_export_title">导出运行日志</string>
+    <string name="settings_log_export_hint">勾选要导出的日志文件（可多选）</string>
+    <string name="settings_log_export_empty">暂无日志文件</string>
+    <string name="settings_log_export_btn">导出所选</string>
     <string name="settings_version_label">版本</string>
 
     <!-- ===== 副音频衬托（设置页播放组） ===== -->
