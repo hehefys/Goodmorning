@@ -1,0 +1,13 @@
+services:
+  dyproxy:
+    build: .
+    container_name: dyproxy
+    restart: unless-stopped
+    ports:
+      - "1200:1200"
+    environment:
+      - PORT=1200
+      # ↓↓↓ 必填：粘贴抖音网页版整串 Cookie（获取方法见 README 第二节）
+      - DOUYIN_COOKIE=在这里粘贴你的抖音Cookie
+      # 默认博主 sec_uid（仅文档用途，可不改）
+      - SEC_UID=MS4wLjABAAAAkme-Sn9GBLHkPFE6TSfhhmHbEfphTt7ZNL9BD14NWAneay8H7OxJQ05-CP9VgmSJ

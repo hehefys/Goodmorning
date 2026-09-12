@@ -94,24 +94,28 @@
     <!-- ===== 使用说明页（DESIGN-V2 §4，§2.4 表格顺序） ===== -->
     <string name="usage_title">使用说明</string>
     <string name="usage_s1_title">快速上手</string>
-    <string name="usage_s1_step1">① 主页设置响铃时间并打开开关</string>
+    <string name="usage_s1_step1">① 主页点时间可直接键入（也可切表盘），打开总开关</string>
     <string name="usage_s1_step2">② 按引导页完成全部 5 项权限</string>
-    <string name="usage_s1_step3">③ 点「立即同步」验证数据源，之后每天 05:30 / 21:00 自动同步</string>
+    <string name="usage_s1_step3">③ 点「立即同步」验证数据源；每天 05:30 / 12:00 / 21:00 自动同步</string>
     <string name="usage_s2_title">权限说明</string>
-    <string name="usage_s2_p1">通知权限：展示响铃通知。不开则锁屏可能收不到响铃提醒。</string>
+    <string name="usage_s2_p1">通知权限：展示响铃通知与锁屏媒体控制卡。不开则锁屏可能收不到提醒。</string>
     <string name="usage_s2_p2">精确闹钟：保证准点响铃。不开则可能延迟数分钟。</string>
     <string name="usage_s2_p3">自启动：开机后恢复闹钟。不开则重启手机后闹钟丢失。</string>
     <string name="usage_s2_p4">省电策略「无限制」：防止系统杀后台。不开则闹钟可能整晚被杀。</string>
-    <string name="usage_s2_p5">全屏显示通知：锁屏直接弹出响铃页。不开则只收到普通通知。</string>
+    <string name="usage_s2_p5">全屏显示通知：锁屏直接亮屏显示响铃通知与控制按钮。不开则只收到普通通知。</string>
     <string name="usage_s3_title">同步与数据源</string>
-    <string name="usage_s3_p1">RSSHub 地址是视频数据源；公共实例对抖音路由不稳定，报 EMPTY/PARSE 属已知现象，不影响响铃（有缓存与铃声兜底）。</string>
-    <string name="usage_s3_p2">每天 05:30 与 21:00 自动同步并缓存最近视频；「立即同步」可手动触发验证。</string>
-    <string name="usage_s4_title">响铃页操作</string>
-    <string name="usage_s4_p1">向右滑到底停止响铃；「稍后提醒」按设定间隔再响；圆形键暂停/继续；「打开抖音」直达博主主页。</string>
+    <string name="usage_s3_p1">数据源地址指向自建代理或 RSSHub 实例；公共实例对抖音路由不稳定，报 EMPTY/PARSE 属已知现象，不影响响铃（有缓存与铃声兜底）。异常数据会被自动拦截。</string>
+    <string name="usage_s3_p2">每天 05:30 / 12:00 / 21:00 自动同步并缓存最近视频（博主常在前一晚 23 点后发次日视频，选片会自动识别）；「立即同步」可手动触发。</string>
+    <string name="usage_s4_title">响铃与播放控制</string>
+    <string name="usage_s4_p1">闹钟响铃时，锁屏与通知栏出现媒体控制卡：暂停/继续（整场暂停，含背景音乐）、拖动进度条定位、停止、稍后提醒；贪睡后通知栏驻留下次响铃时间，可滑动清除。</string>
+    <string name="usage_s4_p2">副音频衬托（可选）：响铃先循环播放你选的背景音乐温柔唤醒，衬托结束自动播放视频音频并压低背景音；播放区间与时长都能在设置里调。</string>
+    <string name="usage_s4_p3">「播完自动重播」开启后，整段播完若未手动停止会自动从头再来，直到手动关闭。</string>
     <string name="usage_s5_title">常见问题</string>
+    <string name="usage_s5_q4">播完了怎么又响了？开启「播完自动重播」后会循环播放，按停止即可结束。</string>
+    <string name="usage_s5_q5">排查问题：设置 → 导出运行日志，可勾选任意日期的日志多选导出发给开发者。</string>
     <string name="usage_s5_q1">不响？依次查：①省电策略无限制 ②精确闹钟允许 ③自启动开启 ④最近任务上锁。</string>
     <string name="usage_s5_q2">缓存最多保留 3 条视频（约 10–50MB/条），可在设置页清除。</string>
-    <string name="usage_s5_q3">更换博主会清空旧博主缓存并重新下载新博主最近视频。</string>
+    <string name="usage_s5_q3">更换博主会清空旧缓存并重新下载；「历史博主」列表可一键切回，× 可删除历史条目。</string>
 
     <!-- ===== 响铃页 ===== -->
     <string name="ringing_today_source">今日早安</string>

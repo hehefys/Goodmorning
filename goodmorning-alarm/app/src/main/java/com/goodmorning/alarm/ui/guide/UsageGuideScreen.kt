@@ -120,12 +120,14 @@ fun UsageGuideScreen(
                 Paragraph(stringResource(R.string.usage_s3_p2))
             }
 
-            // ④ 响铃页操作
+            // ④ 响铃与播放控制
             ChapterCard(
                 icon = Icons.AutoMirrored.Filled.MenuBook,
                 title = stringResource(R.string.usage_s4_title)
             ) {
                 Paragraph(stringResource(R.string.usage_s4_p1))
+                Paragraph(stringResource(R.string.usage_s4_p2))
+                Paragraph(stringResource(R.string.usage_s4_p3))
             }
 
             // ⑤ 常见问题（Q/A 形态）
@@ -143,6 +145,14 @@ fun UsageGuideScreen(
                 )
                 FaqRow(
                     question = stringResource(R.string.usage_s5_q3),
+                    answer = null
+                )
+                FaqRow(
+                    question = stringResource(R.string.usage_s5_q4),
+                    answer = null
+                )
+                FaqRow(
+                    question = stringResource(R.string.usage_s5_q5),
                     answer = null
                 )
             }
