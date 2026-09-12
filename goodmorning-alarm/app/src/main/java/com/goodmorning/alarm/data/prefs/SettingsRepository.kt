@@ -242,6 +242,16 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    /** 从历史中删除指定博主条目（当前博主不受影响） */
+    suspend fun removeBloggerHistory(secUid: String) {
+        context.dataStore.edit { prefs ->
+            val current = runCatching {
+                bloggerJson.decodeFromString<List<BloggerEntry>>(prefs[Keys.BLOGGER_HISTORY] ?: "[]")
+            }.getOrDefault(emptyList()).filterNot { it.secUid == secUid }
+            prefs[Keys.BLOGGER_HISTORY] = bloggerJson.encodeToString(current)
+        }
+    }
+
     /** 读取上一次同步使用的博主 sec_uid（空串 = 从未同步过） */
     suspend fun lastBloggerSecUid(): String =
         context.dataStore.data.first()[Keys.LAST_BLOGGER_SEC_UID] ?: ""

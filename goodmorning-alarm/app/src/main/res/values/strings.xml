@@ -44,7 +44,8 @@
     <string name="settings_blogger_title">博主管理</string>
     <string name="settings_blogger_current">当前博主</string>
     <string name="settings_blogger_change">更换博主</string>
-    <string name="settings_blogger_history_label">历史博主（点击快速切换）</string>
+    <string name="settings_blogger_history_label">历史博主（点击快速切换，× 删除）</string>
+    <string name="settings_blogger_history_delete">删除该历史记录</string>
     <string name="settings_blogger_switch_confirm_title">切换博主？</string>
     <string name="settings_blogger_switch_confirm_body">切换到「%1$s」将清空当前缓存并重新同步，之后的闹钟将播放该博主的内容。</string>
     <string name="settings_blogger_help">更换后将清空旧缓存并立即同步</string>

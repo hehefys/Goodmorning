@@ -94,6 +94,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val bloggerHistory: StateFlow<List<BloggerEntry>> = settingsRepository.bloggerHistory
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** 删除一条博主历史 */
+    fun removeBloggerHistory(secUid: String) {
+        viewModelScope.launch { settingsRepository.removeBloggerHistory(secUid) }
+    }
+
     /**
      * 从历史快速切换博主：校验可达性 → 保存（自动记历史）→ toast → 自动重同步。
      * 服务器未返回展示名（回退 secUid 前缀）时沿用历史里已知的名字。

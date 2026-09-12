@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
@@ -30,6 +31,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -253,12 +255,19 @@ fun SettingsScreen(
                                     color = Ink60
                                 )
                             }
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = Ink60,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            IconButton(
+                                onClick = { viewModel.removeBloggerHistory(entry.secUid) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = stringResource(
+                                        R.string.settings_blogger_history_delete
+                                    ),
+                                    tint = Ink60,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1082,20 +1091,33 @@ private fun LogExportDialog(
     )
 }
 
-/** 多选日志分享（FileProvider 授权只读，ACTION_SEND_MULTIPLE 一次带走） */
+/** 多选日志分享：单文件直发；多文件打包 zip 后走单文件通道（微信不注册 ACTION_SEND_MULTIPLE） */
 private fun exportLogs(context: android.content.Context, files: List<File>) {
     if (files.isEmpty()) return
-    val uris = ArrayList(
-        files.map {
-            androidx.core.content.FileProvider.getUriForFile(
-                context, "${context.packageName}.fileprovider", it
-            )
+    val shareUri: android.net.Uri = if (files.size == 1) {
+        androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", files.first()
+        )
+    } else {
+        val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+        val zip = File(exportDir, "gma-logs.zip")
+        java.util.zip.ZipOutputStream(java.io.FileOutputStream(zip)).use { zos ->
+            files.forEach { f ->
+                zos.putNextEntry(java.util.zip.ZipEntry(f.name))
+                f.inputStream().use { input -> input.copyTo(zos) }
+                zos.closeEntry()
+            }
         }
-    )
-    val send = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-        type = "text/plain"
-        putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+        androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", zip
+        )
+    }
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = if (files.size == 1) "text/plain" else "application/zip"
+        putExtra(android.content.Intent.EXTRA_STREAM, shareUri)
         putExtra(android.content.Intent.EXTRA_SUBJECT, "每日早安 运行日志")
+        // 部分目标（微信）依赖 clipData 获得读授权
+        clipData = android.content.ClipData.newRawUri("logs", shareUri)
         addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     runCatching {

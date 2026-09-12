@@ -2,4 +2,6 @@
 <!-- FileProvider 共享路径：仅放行日志目录（设置页「导出运行日志」用） -->
 <paths>
     <files-path name="logs" path="logs/" />
+    <!-- 多选日志打包 zip 的导出目录 -->
+    <files-path name="exports" path="exports/" />
 </paths>
