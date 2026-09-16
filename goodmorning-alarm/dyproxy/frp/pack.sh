@@ -19,7 +19,11 @@ STAMP="$(date +%Y%m%d)"
 
 [ -f "$ROOT/dyproxy.cjs" ] || { echo "✗ 找不到 $ROOT/dyproxy.cjs" >&2; exit 1; }
 
-VER="$(grep -oE "version: *'[0-9.]+'" "$ROOT/dyproxy.cjs" | head -1 | grep -oE "[0-9.]+" || true)"
+# 版本号：优先取 `const VERSION = 'x.y'`，退回 `version: 'x.y'`
+VER="$(grep -oE "(const )?VERSION *= *'[0-9.]+'" "$ROOT/dyproxy.cjs" | head -1 | grep -oE "[0-9.]+" || true)"
+if [ -z "$VER" ]; then
+  VER="$(grep -oE "version: *'[0-9.]+'" "$ROOT/dyproxy.cjs" | head -1 | grep -oE "[0-9.]+" || true)"
+fi
 VER="${VER:-unknown}"
 
 NAME="goodmorning-dyproxy-deploy-v${VER}-${STAMP}"
@@ -32,10 +36,12 @@ rm -rf "$STAGE"
 mkdir -p "$PKG/vm" "$PKG/server"
 
 # ---------- 家庭端（dyproxy + frpc）----------
-cp "$ROOT/dyproxy.cjs"       "$PKG/vm/"
-cp "$ROOT/.env.example"      "$PKG/vm/"
-cp "$HERE/frpc.example.toml" "$PKG/vm/"
-cp "$HERE/setup-linux-vm.sh" "$PKG/vm/"
+cp "$ROOT/dyproxy.cjs"        "$PKG/vm/"
+cp "$ROOT/package.json"       "$PKG/vm/"
+cp "$ROOT/package-lock.json"  "$PKG/vm/"
+cp "$ROOT/.env.example"       "$PKG/vm/"
+cp "$HERE/frpc.example.toml"  "$PKG/vm/"
+cp "$HERE/setup-linux-vm.sh"  "$PKG/vm/"
 
 # ---------- 服务器端（frps）----------
 cp "$HERE/frps.example.toml" "$PKG/server/"
@@ -54,19 +60,26 @@ chmod +x "$PKG/vm/setup-linux-vm.sh"
   echo
   echo "生成时间 : $(date '+%Y-%m-%d %H:%M:%S %z')"
   echo "dyproxy  : v${VER}"
-  echo "Node.js  : v24.19.0（要求 >= 18，无第三方 npm 依赖）"
+  echo "Node.js  : v24.19.0（要求 >= 18）"
+  echo "playwright: ^1.63.0（唯一的 npm 依赖，版本随 package-lock.json 锁定）"
+  echo "Chromium : 由 playwright 自动下载（约 200MB），不必随本归档携带"
   echo "frp      : v0.71.0（frps 与 frpc 必须同大版本）"
   echo
   echo "## 先读这个"
   echo "  DEPLOY.md"
   echo "    第一节  这套东西由什么组成"
-  echo "    第三节  最小配置需求（CPU / 内存 / 磁盘 / 网络，含依据）"
+  echo "    第三节  最小配置需求（CPU / 内存 / 磁盘 / 网络，含依据与实测值）"
   echo "    第五节  从零到跑通（换机迁移）"
   echo "    第十节  验收清单"
   echo
   echo "## 目录结构"
-  echo "  vm/      家庭端：dyproxy.cjs、.env.example、frpc.example.toml、setup-linux-vm.sh"
+  echo "  vm/      家庭端：dyproxy.cjs、package.json、package-lock.json、.env.example、"
+  echo "           frpc.example.toml、setup-linux-vm.sh"
   echo "  server/  服务器端：frps.example.toml、docker-compose.yml"
+  echo
+  echo "## 部署时会发生什么"
+  echo "  setup-linux-vm.sh 会自动 npm install 并下载 Chromium（约 200MB），"
+  echo "  所以不需要把 node_modules/ 和 browsers/ 放进归档。"
   echo
   echo "## 本归档不含密钥，需自行准备"
   echo "  vm/.env            单行 DOUYIN_COOKIE=<整串 Cookie>，约 6500 字符"

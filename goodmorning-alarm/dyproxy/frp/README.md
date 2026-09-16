@@ -74,15 +74,17 @@ docker compose logs -f   # 看到 "frps started successfully" 即成功
 ### 方式一：Linux 虚拟机 —— 一键脚本（推荐）
 
 如果家里那台机器是 Linux（含 VMware / VirtualBox / Hyper-V 里的 Ubuntu、Debian 虚拟机），
-本目录的 `setup-linux-vm.sh` 会一次装好依赖、Node、frpc，并注册好 systemd 服务与开机自启：
+本目录的 `setup-linux-vm.sh` 会一次装好依赖、Node、frpc、**npm 依赖与 Chromium**，
+并注册好 systemd 服务与开机自启：
 
 ```bash
-# 1) 先把 dyproxy.cjs / .env / frpc.local.toml 放进 /opt/dyproxy/
+# 1) 先把 dyproxy.cjs / package.json / package-lock.json / .env / frpc.local.toml
+#    放进 /opt/dyproxy/
 sudo mkdir -p /opt/dyproxy
 #   传文件建议：VM 里 apt install openssh-server，
 #   然后用 VS Code Remote-SSH 连上去直接拖拽（.env 有 6500 字符，别用终端粘贴）
 
-# 2) 一键部署
+# 2) 一键部署（会下载约 200MB 的 Chromium，这一步最慢）
 sudo bash setup-linux-vm.sh
 ```
 
@@ -111,8 +113,21 @@ frpc -v
 ```
 ~/dyproxy/
 ├── dyproxy.cjs        ← 从仓库拷，代码不用改
+├── package.json       ← npm 依赖清单（playwright）
+├── package-lock.json  ← 依赖版本锁定
 ├── .env               ← Cookie，和服务器上那份是同一个
 └── frpc.local.toml    ← auth.token 必须和服务器 frps.local.toml 一致
+```
+
+装依赖与浏览器（只需做一次，约 200MB，耗时较长）：
+
+```bash
+cd ~/dyproxy
+npm install
+npx playwright install chromium
+# 若下载慢，可加国内镜像：
+#   npm install --registry=https://registry.npmmirror.com
+#   PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright npx playwright install chromium
 ```
 
 ### 3. 启动两个进程
@@ -122,7 +137,7 @@ cd ~/dyproxy
 
 # 终端 A：先起 dyproxy
 node dyproxy.cjs
-# 期待：dyproxy v3.1 已启动：http://localhost:1200
+# 期待：dyproxy v4.0 已启动：http://localhost:1200
 
 # 终端 B：再起 frpc
 frpc -c ~/dyproxy/frpc.local.toml
@@ -135,14 +150,14 @@ frpc -c ~/dyproxy/frpc.local.toml
 
 ```bash
 curl -s http://127.0.0.1:1200/health
-# {"ok":true,"service":"dyproxy","version":"3.1","port":1200}
+# {"ok":true,"service":"dyproxy","version":"4.0","port":1200,"mode":"auto","playwright":"available"}
 
 curl -s "http://127.0.0.1:1200/douyin/user/MS4wLjABAAAAkme-Sn9GBLHkPFE6TSfhhmHbEfphTt7ZNL9BD14NWAneay8H7OxJQ05-CP9VgmSJ?format=json" | head -c 200
 # 期待 200 且 {"title":"每日早安","items":[...]}
 ```
 
-**重点**：这条一旦是 200，就说明**出口已经是家宽 IP**，整条链路通了。
-（对比：之前从机房 IP 发同一个请求是 403。）
+**重点**：这条一旦是 200，说明 **Cookie、浏览器、隧道三者都正常**，整条链路通了。
+（首次约 5-25s，因为要拉起浏览器；之后 10 分钟内命中缓存，毫秒级返回。）
 
 App 端：数据源地址保持 `http://81.70.52.12:1200` 不变，直接同步即可。
 

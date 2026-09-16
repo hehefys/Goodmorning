@@ -1,0 +1,17 @@
+{
+  "name": "dyproxy",
+  "version": "4.0.0",
+  "private": true,
+  "description": "抖音用户视频列表代理 —— 浏览器抓取版（「每日早安」App 数据源）",
+  "main": "dyproxy.cjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node dyproxy.cjs",
+    "install-browser": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}

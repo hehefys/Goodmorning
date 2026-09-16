@@ -13,6 +13,13 @@ goodmorning-alarm/dyproxy/.env.*
 # frp 隧道凭据（token / 面板密码）
 goodmorning-alarm/dyproxy/frp/*.local.toml
 
+# dyproxy 运行依赖（VM 上由 setup-linux-vm.sh 安装，不入库）
+goodmorning-alarm/dyproxy/node_modules/
+goodmorning-alarm/dyproxy/browsers/
+goodmorning-alarm/dyproxy/_*.log
+goodmorning-alarm/dyproxy/_*.json
+goodmorning-alarm/dyproxy/_*.txt
+
 # Android build outputs
 goodmorning-alarm/.gradle/
 goodmorning-alarm/.kotlin/
