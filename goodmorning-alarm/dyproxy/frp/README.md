@@ -165,3 +165,9 @@ App 端：数据源地址保持 `http://81.70.52.12:1200` 不变，直接同步�
 | `frpc.example.toml` | 家里 | 客户端配置模板 |
 | `frpc.local.toml` | 家里 | 客户端真实配置（**不入库**） |
 | `docker-compose.yml` | 服务器 | 用容器跑 frps |
+| `setup-linux-vm.sh` | 家里 | Linux 一键部署脚本（含 systemd 服务定义） |
+| `pack.sh` | — | 生成可移植部署归档 tar.gz（产物落在 `../dist/`，已 gitignore） |
+
+> 想评估「这台机器够不够跑」或「把整套搬到另一台机器」，看
+> [`../DEPLOY.md`](../DEPLOY.md) —— 里面有实测环境数据、最小配置需求（含依据）、
+> 换机迁移步骤和验收清单。

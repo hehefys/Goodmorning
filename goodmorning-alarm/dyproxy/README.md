@@ -211,8 +211,15 @@ dyproxy 跑在**虚拟机**里，而 VM 跟着宿主 Windows 走。
 | `frp/frpc.local.toml` | VM `/opt/dyproxy/` | 隧道客户端配置（含 token，**不入库**） |
 | `frp/frps.example.toml` | 服务器 | frps 服务端模板 → 复制成 `frps.local.toml` 后填 token |
 | `frp/docker-compose.yml` | 服务器 | 用容器跑 frps |
-| `frp/setup-linux-vm.sh` | VM | 一键部署脚本 |
+| `frp/setup-linux-vm.sh` | VM | 一键部署脚本（装依赖 + 建服务 + 开机自启 + 自检） |
 | `frp/README.md` | — | frp 部署完整文档 |
+
+### 文档与工具
+
+| 文件 | 用途 |
+|------|------|
+| `DEPLOY.md` | **部署与迁移手册**：环境实况、最小配置需求（CPU/内存/磁盘/网络，含依据）、依赖清单、换机迁移步骤、验收清单 |
+| `frp/pack.sh` | 生成可移植部署归档 tar.gz（产物落在 `dist/`，已 gitignore） |
 
 ### 旧方案遗留（当前不用，保留作回退参考）
 
@@ -223,12 +230,7 @@ dyproxy 跑在**虚拟机**里，而 VM 跟着宿主 Windows 走。
 | `docker-compose.yml` | 在服务器上跑 dyproxy 容器（`image: rsshub-ready`） |
 | `restart.sh` | 服务器上换 Cookie 的脚本（重建容器流程） |
 | `Dockerfile` | 构建 dyproxy 镜像（node:24-alpine） |
-| `.env.example` | 环境变量模板 |
+| `.env.example` | 环境变量模板（当前仍用于提示 `.env` 格式） |
 
 > 服务器上现在已经没有 dyproxy 容器了（`docker compose down` 已移除），1200 端口由 frps 占用。
 > 若某天需要回退到机房直连，改回读抖音会再次 403 —— 回退只适用于其他不受风控的场景。
-
-### 诊断脚本（可删）
-
-`diag.sh`、`diag2.sh`、`sigtest.cjs`、`sigtest2.cjs`、`sigtest3.cjs`、`a_bogus.cjs` 是本次排查
-「403 是 IP 问题还是签名问题」时的一次性工具，结论已定案（见第一节），**可以删除**。

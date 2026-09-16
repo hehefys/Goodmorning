@@ -31,6 +31,9 @@ island-test/local.properties
 # 打包快照（源码已在 git 中，无需留存 zip）
 *.zip
 
+# 部署归档产物（由 dyproxy/frp/pack.sh 生成，可随时重建）
+goodmorning-alarm/dyproxy/dist/
+
 # IDE
 .idea/
 
