@@ -1,0 +1,19 @@
+services:
+  frps:
+    image: fatedier/frps:v0.71.0
+    container_name: frps
+    restart: unless-stopped
+
+    # 用 host 网络：frps 需要直接绑定宿主机端口 7000（隧道）和 1200（对外服务）
+    network_mode: host
+
+    volumes:
+      - ./frps.local.toml:/etc/frp/frps.toml:ro
+
+    command: ["-c", "/etc/frp/frps.toml"]
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

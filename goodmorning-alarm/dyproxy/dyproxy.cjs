@@ -20,6 +20,27 @@
 
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+// 兜底：没有通过环境变量注入时，自动读取同目录下的 .env
+// （Docker / PM2 场景一般已注入，此处不覆盖已有值；裸 Node 场景就靠它拿 Cookie）
+(function loadDotEnv() {
+  try {
+    const p = path.join(__dirname, '.env');
+    if (!fs.existsSync(p)) return;
+    for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
+      const s = line.trim();
+      if (!s || s[0] === '#') continue;
+      const i = s.indexOf('=');
+      if (i <= 0) continue;
+      const k = s.slice(0, i).trim();
+      if (process.env[k] === undefined) process.env[k] = s.slice(i + 1);
+    }
+  } catch (e) {
+    log('WARN 读取 .env 失败，改用环境变量：' + e.message);
+  }
+})();
 
 const PORT = Number(process.env.PORT || 1200);
 const COOKIE = process.env.DOUYIN_COOKIE || '';

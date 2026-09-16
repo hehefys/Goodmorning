@@ -1,0 +1,36 @@
+# frps —— frp 服务端配置（跑在腾讯云服务器上）
+#
+# 用法：
+#   cp frps.example.toml frps.local.toml
+#   把两处 REPLACE_... 换成真实值（生成长口令：openssl rand -hex 24）
+#   frps.local.toml 已被 .gitignore 排除，不会进公开仓库
+
+# 客户端（家里那台）连过来的端口。腾讯云安全组需要放行 7000/TCP
+bindPort = 7000
+
+
+# ---------- 认证：防止陌生人连上来注册隧道 ----------
+auth.method = "token"
+auth.token = "REPLACE_WITH_A_RANDOM_TOKEN"
+
+
+# ---------- 只允许客户端申请 1200 这一个远程端口 ----------
+# 即使 token 泄露，攻击者也没法拿你的服务器转发别的端口
+allowPorts = [
+  { start = 1200, end = 1200 }
+]
+
+
+# ---------- 管理面板：仅监听本机，从外部访问不到 ----------
+# 想看得先 SSH 登录服务器，然后本地做端口转发：
+#   ssh -L 7500:127.0.0.1:7500 ubuntu@81.70.52.12
+#   浏览器打开 http://127.0.0.1:7500  （admin / 你设的密码）
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "REPLACE_WITH_A_DASHBOARD_PASSWORD"
+
+
+# ---------- 日志 ----------
+log.to = "console"
+log.level = "info"

@@ -1,8 +1,17 @@
-# Node / dyproxy
-dyproxy/node_modules/
-dyproxy/browsers/
-dyproxy/npm-cache/
-dyproxy/cookie.txt
+# Node / 旧版 dyproxy 工作目录（仅根目录；App 内置部署包 goodmorning-alarm/dyproxy 不排除）
+/dyproxy/node_modules/
+/dyproxy/browsers/
+/dyproxy/npm-cache/
+cookie.txt
+
+# dyproxy 部署凭据（含抖音账号 Cookie，等同登录态，切勿入库）
+goodmorning-alarm/dyproxy/.env
+goodmorning-alarm/dyproxy/.env.*
+!goodmorning-alarm/dyproxy/.env.example
+*.env.local
+
+# frp 隧道凭据（token / 面板密码）
+goodmorning-alarm/dyproxy/frp/*.local.toml
 
 # Android build outputs
 goodmorning-alarm/.gradle/
@@ -12,6 +21,16 @@ goodmorning-alarm/app/release/
 goodmorning-alarm/local.properties
 goodmorning-alarm.zip
 
+# island-test（独立实验工程）构建产物
+island-test/.gradle/
+island-test/.kotlin/
+island-test/app/build/
+island-test/app/release/
+island-test/local.properties
+
+# 打包快照（源码已在 git 中，无需留存 zip）
+*.zip
+
 # IDE
 .idea/
 
@@ -20,5 +39,5 @@ goodmorning-alarm.zip
 *.keystore
 
 # 无关项目与工作区元数据
-dyproxy/
+/dyproxy/
 .workbuddy/

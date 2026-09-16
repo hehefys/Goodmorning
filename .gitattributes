@@ -1,0 +1,47 @@
+# 统一换行符与文件类型处理
+#
+# 背景：Windows 上 core.autocrlf=true 会把 LF 转成 CRLF 检出，
+# 而 shell 脚本一旦带 CRLF，在 Linux 上会直接报 `$'\r': command not found` 跑不起来。
+# 部署脚本（dyproxy/frp/setup-linux-vm.sh）正是要拷到 Linux 执行的，必须锁死 LF。
+
+# 默认交给 git 自动判断
+* text=auto
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# ---- 必须在任何平台都保持 LF ----
+*.sh          text eol=lf
+*.cjs         text eol=lf
+*.js          text eol=lf
+*.mjs         text eol=lf
+*.ts          text eol=lf
+*.toml        text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.json        text eol=lf
+*.md          text eol=lf
+Dockerfile    text eol=lf
+*.example     text eol=lf
+gradlew       text eol=lf
+
+# ---- Windows 专用脚本保持 CRLF ----
+*.bat         text eol=crlf
+*.cmd         text eol=crlf
+gradlew.bat   text eol=crlf
+
+# ---- 二进制，禁止任何转换 ----
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.webp        binary
+*.ico         binary
+*.wav         binary
+*.mp3         binary
+*.mp4         binary
+*.jar         binary
+*.apk         binary
+*.aab         binary
+*.jks         binary
+*.keystore    binary
+*.zip         binary

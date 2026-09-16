@@ -1,0 +1,28 @@
+# frpc —— frp 客户端配置（跑在家里那台机器上）
+#
+# 用法：
+#   cp frpc.example.toml frpc.local.toml
+#   把 serverAddr / auth.token 换成真实值
+#
+# 重要：这里的 auth.token 必须和服务器 frps.local.toml 里的完全一致。
+
+# 服务器公网地址与 frps 的 bindPort
+serverAddr = "81.70.52.12"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "REPLACE_WITH_A_RANDOM_TOKEN"
+
+
+# ---------- 心跳与重连（隧道断了自动重连）----------
+transport.heartbeatInterval = 10
+transport.heartbeatTimeout = 30
+
+
+# ---------- 把服务器的 1200 端口，映射到家里的 1200（即 dyproxy）----------
+[[proxies]]
+name = "dyproxy"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1200
+remotePort = 1200
