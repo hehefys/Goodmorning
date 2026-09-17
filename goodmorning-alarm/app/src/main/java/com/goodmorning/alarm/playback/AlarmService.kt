@@ -208,7 +208,7 @@ class AlarmService : Service() {
             Constants.ACTION_STOP -> handleStop()
             Constants.ACTION_SNOOZE -> handleSnooze()
             Constants.ACTION_PLAY_PAUSE -> handlePlayPause()
-            Constants.ACTION_REPOST_NOTIF -> handleRepostNotification()
+            Constants.ACTION_NOTIF_DISMISSED -> handleNotifDismissed()
             else -> {
                 if (ringingGuard.compareAndSet(false, true)) {
                     sessionSeq++
@@ -823,14 +823,17 @@ class AlarmService : Service() {
     }
 
     /**
-     * 响铃通知被划掉（暂停态下系统允许清除 MediaStyle）：
-     * 只要还在响铃就立即重建控制面板——响铃场绝不能失去控制入口
-     * （用户反馈：划掉后只能杀应用才能关闹钟）。
+     * 响铃通知被划掉（暂停态下系统允许清除 MediaStyle）→ **停止本次响铃**。
+     *
+     * 历史：v2 起此处是「立即重建控制面板」，目的是不让用户误划后失去停止入口
+     * （当时反馈：划掉后只能杀应用才能关闹钟）。
+     * 2026-09-17 用户明确改选「划掉即停止」—— 语义更符合直觉（划掉 = 我不听了），
+     * 通知内仍保留显式的「停止 / 贪睡」按钮作为常规操作路径。
      */
-    private fun handleRepostNotification() {
+    private fun handleNotifDismissed() {
         if (!ringingGuard.get()) return
-        AppLogger.i(TAG, "通知被清除 → 重建响铃控制面板")
-        rebuildRingingNotification()
+        AppLogger.i(TAG, "通知被划掉 → 停止本次响铃")
+        handleStop()
     }
 
     /** 停止本次响铃：副音频即停，主音频 600ms 渐弱收尾后撤通知、注册明天闹钟、补调度同步 */
@@ -1022,12 +1025,12 @@ class AlarmService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            // 暂停态下系统允许用户划掉媒体通知：划掉立即重建，响铃场不能失去控制入口
+            // 暂停态下系统允许用户划掉媒体通知：划掉 = 停止本次响铃（见 handleNotifDismissed）
             .setDeleteIntent(
                 PendingIntent.getService(
-                    this, REQUEST_CODE_REPOST,
+                    this, REQUEST_CODE_NOTIF_DISMISS,
                     Intent(this, AlarmService::class.java)
-                        .apply { action = Constants.ACTION_REPOST_NOTIF },
+                        .apply { action = Constants.ACTION_NOTIF_DISMISSED },
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
@@ -1070,7 +1073,7 @@ class AlarmService : Service() {
         private const val REQUEST_CODE_STOP = 3002
         private const val REQUEST_CODE_SNOOZE = 3003
         private const val REQUEST_CODE_PLAY_PAUSE = 3004
-        private const val REQUEST_CODE_REPOST = 3005
+        private const val REQUEST_CODE_NOTIF_DISMISS = 3005
 
         /** 缓存为空时的响铃现场同步上限：超时即放弃网络、走兜底铃声（响铃不能久等） */
         private const val RING_SYNC_TIMEOUT_MS = 8_000L
@@ -1168,6 +1171,15 @@ class AlarmService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setOngoing(true)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                // 与正式前台通知保持同一语义：划掉 = 停止本次响铃
+                .setDeleteIntent(
+                    PendingIntent.getService(
+                        context, REQUEST_CODE_NOTIF_DISMISS,
+                        Intent(context, AlarmService::class.java)
+                            .apply { action = Constants.ACTION_NOTIF_DISMISSED },
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                )
                 .addAction(buildStopAction(context))
                 .addAction(buildSnoozeAction(context))
                 .build()

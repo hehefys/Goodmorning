@@ -104,8 +104,15 @@ object Constants {
     const val ACTION_STOP = "com.goodmorning.alarm.action.STOP"
     const val ACTION_SNOOZE = "com.goodmorning.alarm.action.SNOOZE"
     const val ACTION_PLAY_PAUSE = "com.goodmorning.alarm.action.PLAY_PAUSE"
-    /** 响铃通知被用户划掉：还在响铃时立即重建控制面板 */
-    const val ACTION_REPOST_NOTIF = "com.goodmorning.alarm.action.REPOST_NOTIF"
+    /**
+     * 响铃通知被用户划掉 → 停止本次响铃。
+     *
+     * 历史：v2 起该行为是「重建通知」，避免用户误划后失去停止入口
+     * （当时反馈：划掉后只能杀应用才能关闹钟）。
+     * 2026-09-17 用户明确改选「划掉即停止」—— 语义更直觉：划掉 = 我不听了。
+     * 通知内仍保留显式的「停止 / 贪睡」按钮作为常规操作路径。
+     */
+    const val ACTION_NOTIF_DISMISSED = "com.goodmorning.alarm.action.NOTIF_DISMISSED"
 
     // ===== 通知 =====
     // v2：渠道创建后声音设置不可变；响铃音频由服务经 USAGE_ALARM 播放，
