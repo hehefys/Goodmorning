@@ -231,7 +231,20 @@ class AlarmService : Service() {
                 } else if (intent.getBooleanExtra(Constants.EXTRA_FORCE, false)) {
                     // 测试键打断进行中的响铃：旧测试场直接杀掉，立即开新一场
                     // （陈年反馈：以前必须先手动关掉上一场才能测下一场）
-                    forceRestartSession()
+                    forceRestartSession("测试键打断当前响铃")
+                } else if (mediaPaused) {
+                    // 暂停中的旧场**不得**吞掉新的到点（2026-09-17 事故）。
+                    //
+                    // 媒体卡「暂停」只静音、不结束响铃场：ringingGuard 仍为 true，
+                    // 于是此后每一次真实到点都落进下面的「重复 ACTION_RING」分支被忽略。
+                    // 实测：09-16 19:28 的一次暂停，把 09-16 19:24/19:25/19:28 与
+                    // 09-17 10:00/11:07 共五次到点全部吞掉，且跨夜存活 ——
+                    // 这正是 09-17 早上「闹钟没响」的真正原因（不是看门狗那次）。
+                    //
+                    // 语义澄清：用户按「暂停」= 先静音这一声，不等于放弃后续闹钟。
+                    // 有新到点就当作新一场重新起播（同时把播放位置复位）。
+                    AppLogger.i(TAG, "上一场处于暂停态 → 新到点重开一场（暂停不得吞掉闹钟）")
+                    forceRestartSession("上一场暂停中，新到点不得被吞")
                 } else {
                     AppLogger.i(TAG, "重复 ACTION_RING 到达，忽略（已在响铃）")
                 }
@@ -835,12 +848,17 @@ class AlarmService : Service() {
     // ---- 控制命令 ----
 
     /**
-     * 测试键打断进行中的响铃：立即终止旧测试场并开新一场。
-     * 不走 handleStop 的收尾登记（不注册明天闹钟/不排同步）——测试场与真实调度无关，
-     * 新一场结束时的 handleStop 会统一处理。
+     * 终止当前响铃场并立即开新一场（不打收尾登记：不注册明天闹钟、不排同步）。
+     *
+     * 两条触发路径：
+     * - 测试键打断进行中的响铃（陈年反馈：以前必须先手动关掉上一场才能测下一场）
+     * - **上一场处于暂停态时又来了新的到点**（暂停只静音、不结束场，若仍按「重复到点」
+     *   忽略，后续每一次闹钟都会被吞掉 —— 见 2026-09-17 事故）
+     *
+     * 收尾登记交给新一场结束时的 [handleStop] 统一处理。
      */
-    private fun forceRestartSession() {
-        AppLogger.i(TAG, "测试键打断当前响铃 → 强制重开新一场")
+    private fun forceRestartSession(reason: String) {
+        AppLogger.i(TAG, "重开新一场（$reason）")
         stopToneFallback()
         leadJob?.cancel()
         leadJob = null
