@@ -93,6 +93,19 @@ class AlarmService : Service() {
     /** 响铃卫兵：双 ACTION_RING 连发（每日与贪睡同时到点）只选片一次 */
     private val ringingGuard = AtomicBoolean(false)
 
+    /**
+     * 起播看门狗：卫兵已置位却迟迟没出声时强制兜底，杜绝「哑响铃」。
+     * 事故说明见 [Constants.RING_WATCHDOG_MS]。
+     */
+    private var watchJob: Job? = null
+
+    /**
+     * 最近一次成功读取的设置。读设置超时/失败时退回它，避免整场响铃卡在读设置上。
+     * 首次启动无缓存时为 null，调用方据此退回 [Settings] 默认值（宁可参数不完美，也不能没声音）。
+     */
+    @Volatile
+    private var lastGoodSettings: Settings? = null
+
     /** ToneGenerator 第四级兜底（惰性创建，用完释放） */
     private var toneGenerator: ToneGenerator? = null
     private var toneJob: Job? = null
@@ -200,6 +213,8 @@ class AlarmService : Service() {
                 if (ringingGuard.compareAndSet(false, true)) {
                     sessionSeq++
                     fallbackEngaged.set(false)
+                    // 绝不允许「卫兵已置位、却迟迟没声音」——看门狗兜住任何静默挂起
+                    startRingWatchdog()
                     selectAndPlay()
                 } else if (intent.getBooleanExtra(Constants.EXTRA_FORCE, false)) {
                     // 测试键打断进行中的响铃：旧测试场直接杀掉，立即开新一场
@@ -226,8 +241,55 @@ class AlarmService : Service() {
         }
     }
 
+    /**
+     * 读设置：带超时 + 上次成功值兜底。
+     *
+     * 为什么不直接 `settingsRepository.current()`：它是 DataStore 的 `flow.first()`，
+     * 属挂起调用。2026-09-17 事故中该调用疑似长时间不返回，导致**主起播与兜底铃声
+     * 两条链路一起哑掉**（兜底里也在读它），而卫兵已置位 → 后续 ACTION_RING 全被
+     * 当作重复忽略，形成无法自愈的哑响铃。
+     * 这里给单步加超时：超时就用上次成功值；没有缓存则返回 null，由调用方降级出声。
+     */
+    private suspend fun readSettingsOrLast(): Settings? =
+        withTimeoutOrNull(Constants.RING_STEP_TIMEOUT_MS) {
+            runCatching { settingsRepository.current() }.getOrNull()
+        }.also { if (it != null) lastGoodSettings = it } ?: lastGoodSettings
+
+    /**
+     * 起播看门狗：卫兵已置位，但 [Constants.RING_WATCHDOG_MS] 内既没起播主音频、
+     * 也没进入兜底 → 判定为哑响铃，强制走兜底铃声。
+     * 这是「绝不哑火」的最后一道保险，覆盖任何未被日志捕获的挂起或静默失败。
+     */
+    private fun startRingWatchdog() {
+        val gen = sessionSeq
+        watchJob?.cancel()
+        watchJob = serviceScope.launch {
+            delay(Constants.RING_WATCHDOG_MS)
+            if (gen != sessionSeq) return@launch                            // 已被新一场接管
+            if (!ringingGuard.get()) return@launch                          // 已停止/贪睡
+            if (mainStarted || fallbackEngaged.get()) return@launch         // 已正常出声
+            AppLogger.w(
+                TAG,
+                "起播看门狗触发：${Constants.RING_WATCHDOG_MS}ms 内未出声，" +
+                    "强制走兜底（mainStarted=false, fallbackEngaged=false）"
+            )
+            leadJob?.cancel()
+            leadJob = null
+            if (fallbackEngaged.compareAndSet(false, true)) {
+                playFallback("起播超时（看门狗）")
+            }
+        }
+    }
+
+    /** 取消看门狗：停止/贪睡/接管新场/已出声时调用 */
+    private fun cancelWatchdog() {
+        watchJob?.cancel()
+        watchJob = null
+    }
+
     override fun onDestroy() {
         stopToneFallback()
+        cancelWatchdog()
         mediaTickerJob?.cancel()
         serviceScope.cancel()
         if (::player.isInitialized) runCatching { player.release() }
@@ -254,9 +316,16 @@ class AlarmService : Service() {
                     mediaSession?.isActive = true
                     updateMediaState()
                 }
-                val settings = settingsRepository.current()
+                val t0 = System.currentTimeMillis()
+                val settings = readSettingsOrLast()
                 val today = TimeUtils.localDate()
                 var videos = repository.playableVideos()
+                AppLogger.i(
+                    TAG,
+                    "起播准备完成：读设置 ${System.currentTimeMillis() - t0}ms，" +
+                        "settings ${if (settings == null) "超时→用默认" else "正常"}，" +
+                        "候选 ${videos.size} 条"
+                )
 
                 // 缓存为空才现场补救（定时同步被系统杀掉的场景）：
                 // 有缓存则零延迟直接播，同步交给既有的 05:30/12:00/21:00 链路更新明天。
@@ -291,7 +360,10 @@ class AlarmService : Service() {
                         }
                     }
                 }
-                startMainWith(videos, today, settings)
+                if (settings == null) {
+                    AppLogger.w(TAG, "读设置超时且无缓存值，按默认参数起播（优先出声）")
+                }
+                startMainWith(videos, today, settings ?: Settings())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -365,7 +437,13 @@ class AlarmService : Service() {
         sourceLogValue: String
     ) {
         if (!ringingGuard.get()) return
+        // 已由看门狗或异常进入兜底 → 不再叠加主音频（否则两路声音重叠）
+        if (fallbackEngaged.get()) {
+            AppLogger.w(TAG, "已进入兜底，跳过主音频起播")
+            return
+        }
         mainStarted = true
+        cancelWatchdog()        // 主音频已出声，看门狗使命完成
         // O1 加固：起播抛异常不得让本场卡在「有通知无声音」，直接降级到兜底铃声
         runCatching {
             player.playFile(
@@ -430,7 +508,8 @@ class AlarmService : Service() {
 
         serviceScope.launch {
             try {
-                val settings = settingsRepository.current()
+                // 兜底链路同样不能卡在读设置上：事故中它正是与主链路一起哑掉的
+                val settings = readSettingsOrLast() ?: Settings()
                 val fade = settings.volumeFadeEnabled
                 player.playUri(ringtoneUri, fade, settings.volumeFadeSeconds * 1000L)
                 runCatching { repository.logPlayback(null, Constants.SOURCE_FALLBACK) }
@@ -737,7 +816,9 @@ class AlarmService : Service() {
         ringtoneAttempted = false
         fallbackEngaged.set(false)
         sessionSeq++            // 旧场任何残留回调全部让位
+        cancelWatchdog()
         ringingGuard.set(true)
+        startRingWatchdog()     // 新一场同样需要看门狗兜底
         selectAndPlay()
     }
 
@@ -765,6 +846,7 @@ class AlarmService : Service() {
         currentPlayingPath = null
         currentVideo = null
         mainStarted = false
+        cancelWatchdog()
         val gen = sessionSeq
         serviceScope.launch {
             // 渐弱收尾完成后再做收尾登记，避免服务提前退出截断渐弱
@@ -800,6 +882,7 @@ class AlarmService : Service() {
         currentPlayingPath = null
         currentVideo = null
         mainStarted = false
+        cancelWatchdog()
         val gen = sessionSeq
         serviceScope.launch {
             fadeOutThen {
