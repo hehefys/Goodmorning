@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.Ringtone
 import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.net.Uri
@@ -109,6 +111,16 @@ class AlarmService : Service() {
     /** ToneGenerator 第四级兜底（惰性创建，用完释放） */
     private var toneGenerator: ToneGenerator? = null
     private var toneJob: Job? = null
+
+    /**
+     * 系统铃声（第三级兜底）播放句柄。
+     *
+     * 用 [Ringtone] API 而非 ExoPlayer：Android 15+ 起不允许 ExoPlayer 直接读系统铃声 URI
+     * （实测 ExoPlaybackException + FileNotFoundException:
+     * "Direct file access no longer supported; ringtone playback is available through
+     * android.media.Ringtone"），会让第三级兜底直接失效、一路降级到蜂鸣。
+     */
+    private var systemRingtone: Ringtone? = null
 
     /** 第三级铃声是否已尝试过：防"铃声失败→错误→再铃声"无限循环 */
     private var ringtoneAttempted = false
@@ -256,9 +268,13 @@ class AlarmService : Service() {
         }.also { if (it != null) lastGoodSettings = it } ?: lastGoodSettings
 
     /**
-     * 起播看门狗：卫兵已置位，但 [Constants.RING_WATCHDOG_MS] 内既没起播主音频、
-     * 也没进入兜底 → 判定为哑响铃，强制走兜底铃声。
+     * 起播看门狗：卫兵已置位，但 [Constants.RING_WATCHDOG_MS] 内**既无主音频也无副音频**
+     * → 判定为哑响铃，强制走兜底铃声。
      * 这是「绝不哑火」的最后一道保险，覆盖任何未被日志捕获的挂起或静默失败。
+     *
+     * ⚠️ 判据必须是「完全没声音」，不能只看 [mainStarted]：副音频衬托期（用户可设 10~600s）
+     * 本来就不播主音频。2026-09-17 实测：衬托 5s 与看门狗 5s 正好撞点 → 看门狗误触发
+     * → 兜底铃声抢先起播 → 主音频被误拦，整场只剩兜底（且兜底在该系统上还播不了）。
      */
     private fun startRingWatchdog() {
         val gen = sessionSeq
@@ -267,11 +283,13 @@ class AlarmService : Service() {
             delay(Constants.RING_WATCHDOG_MS)
             if (gen != sessionSeq) return@launch                            // 已被新一场接管
             if (!ringingGuard.get()) return@launch                          // 已停止/贪睡
-            if (mainStarted || fallbackEngaged.get()) return@launch         // 已正常出声
+            if (mainStarted || fallbackEngaged.get()) return@launch         // 主音频已出声
+            // 副音频在播同样算「已经出声」：衬托期要么由 leadJob 到点起主音频，
+            // 要么由 onAmbientEnded 接管，都不需要看门狗插手
+            if (isAmbientPlaying()) return@launch
             AppLogger.w(
                 TAG,
-                "起播看门狗触发：${Constants.RING_WATCHDOG_MS}ms 内未出声，" +
-                    "强制走兜底（mainStarted=false, fallbackEngaged=false）"
+                "起播看门狗触发：${Constants.RING_WATCHDOG_MS}ms 内既无主音频也无副音频，强制兜底"
             )
             leadJob?.cancel()
             leadJob = null
@@ -280,6 +298,10 @@ class AlarmService : Service() {
             }
         }
     }
+
+    /** 副音频是否正在播放（衬托期也算「已经在出声」，看门狗不得据此判哑） */
+    private fun isAmbientPlaying(): Boolean =
+        runCatching { ::player.isInitialized && player.isAmbientPlaying }.getOrDefault(false)
 
     /** 取消看门狗：停止/贪睡/接管新场/已出声时调用 */
     private fun cancelWatchdog() {
@@ -437,13 +459,15 @@ class AlarmService : Service() {
         sourceLogValue: String
     ) {
         if (!ringingGuard.get()) return
-        // 已由看门狗或异常进入兜底 → 不再叠加主音频（否则两路声音重叠）
-        if (fallbackEngaged.get()) {
-            AppLogger.w(TAG, "已进入兜底，跳过主音频起播")
-            return
-        }
+        // 注意：这里**不能**用 fallbackEngaged 拦截。
+        // 兜底与主音频共用同一个 player，playFile 会自然接管（旧声音被替换），无需阻断；
+        // 反倒是阻断会造成「看门狗误判后主音频永久不播」——2026-09-17 实测踩到：
+        // 衬托 5s 与看门狗 5s 撞点，兜底先起，主音频被这条检查拦下，从此整场无声。
         mainStarted = true
         cancelWatchdog()        // 主音频已出声，看门狗使命完成
+        // 兜底（由看门狗或异常触发过）与主音频走**不同**音频通道，必须显式停掉，
+        // 否则会两路声音叠加；过去靠 fallbackEngaged 阻断主音频是错的（已回退）。
+        stopToneFallback()
         // O1 加固：起播抛异常不得让本场卡在「有通知无声音」，直接降级到兜底铃声
         runCatching {
             player.playFile(
@@ -489,15 +513,16 @@ class AlarmService : Service() {
     }
 
     /**
-     * 第三级兜底：系统默认闹钟铃声。
-     * 已试过仍失败或无铃声 URI → 直接进第四级 ToneGenerator 蜂鸣。
+     * 第三级兜底：系统默认闹钟铃声，用 [Ringtone] API 播放。
+     *
+     * 不用 ExoPlayer 的原因：Android 15+ 起禁止其直接读系统铃声 URI
+     * （ExoPlaybackException + "Direct file access no longer supported;
+     * ringtone playback is available through android.media.Ringtone"），
+     * 会让这一级直接失效并一路降级到蜂鸣。
+     *
+     * 已试过仍失败 / 无铃声 URI / 播放异常 → 直接进第四级 ToneGenerator 蜂鸣。
      */
     private fun playFallback(reason: String) {
-        // 播放器都还没建起来（或已释放）→ 铃声兜底无从谈起，直奔蜂鸣
-        if (!::player.isInitialized) {
-            playToneFallback(reason)
-            return
-        }
         val alarmUri: Uri? = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         val ringtoneUri = alarmUri ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
         if (ringtoneUri == null || ringtoneAttempted) {
@@ -506,20 +531,35 @@ class AlarmService : Service() {
         }
         ringtoneAttempted = true
 
-        serviceScope.launch {
-            try {
-                // 兜底链路同样不能卡在读设置上：事故中它正是与主链路一起哑掉的
-                val settings = readSettingsOrLast() ?: Settings()
-                val fade = settings.volumeFadeEnabled
-                player.playUri(ringtoneUri, fade, settings.volumeFadeSeconds * 1000L)
-                runCatching { repository.logPlayback(null, Constants.SOURCE_FALLBACK) }
-                    .onFailure { AppLogger.w(TAG, "记录兜底播放日志失败", it) }
-                AppLogger.w(TAG, "兜底铃声已启用（$reason）→ $ringtoneUri")
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "兜底铃声播放失败，进入蜂鸣兜底（$reason）", e)
-                playToneFallback("兜底铃声异常: ${e.message ?: e.javaClass.simpleName}")
-            }
+        val ringtone = runCatching { RingtoneManager.getRingtone(this, ringtoneUri) }
+            .onFailure { AppLogger.w(TAG, "获取系统铃声失败（$reason）", it) }
+            .getOrNull()
+        if (ringtone == null) {
+            playToneFallback("系统铃声不可用: $reason")
+            return
         }
+
+        val played = runCatching {
+            ringtone.audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            ringtone.play()
+            systemRingtone = ringtone
+        }.onFailure {
+            AppLogger.e(TAG, "系统铃声播放失败，进入蜂鸣兜底（$reason）", it)
+        }.isSuccess
+
+        if (!played) {
+            playToneFallback("系统铃声异常: $reason")
+            return
+        }
+
+        serviceScope.launch {
+            runCatching { repository.logPlayback(null, Constants.SOURCE_FALLBACK) }
+                .onFailure { AppLogger.w(TAG, "记录兜底播放日志失败", it) }
+        }
+        AppLogger.w(TAG, "兜底铃声已启用（Ringtone API，$reason）→ $ringtoneUri")
     }
 
     /** 第四级兜底：ToneGenerator 蜂鸣循环，绝不哑火的最后防线 */
@@ -972,6 +1012,16 @@ class AlarmService : Service() {
             }
         }
         toneGenerator = null
+        // 第三级兜底（系统铃声）一并停掉，避免停止后铃声还在响
+        stopSystemRingtone()
+    }
+
+    /** 停止系统铃声兜底（[Ringtone] API 播放，与 ToneGenerator 分开管理） */
+    private fun stopSystemRingtone() {
+        systemRingtone?.let { rt ->
+            runCatching { if (rt.isPlaying) rt.stop() }
+        }
+        systemRingtone = null
     }
 
     // ---- 前台通知（响铃期间的控制面板） ----
