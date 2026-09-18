@@ -6,8 +6,10 @@ package com.goodmorning.alarm.util
 object Constants {
 
     // ===== 应用版本 =====
-    /** 版本号（设置页「关于」展示；未启用 BuildConfig 时使用此常量） */
-    const val APP_VERSION = "2.2.0"
+    /** 版本号（设置页「关于」展示；未启用 BuildConfig 时使用此常量）
+     *  ⚠️ 改动时须同步 `app/build.gradle.kts` 的 versionName / versionCode，
+     *     否则系统「应用信息」与设置页会显示不同版本（历史上曾长期不一致）。 */
+    const val APP_VERSION = "2.2.1"
 
     // ===== 数据源 =====
     /** 抖音用户「每日早安」的 sec_uid */
