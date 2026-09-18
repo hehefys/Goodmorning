@@ -42,8 +42,9 @@ cd goodmorning-alarm
 
 ## 文档索引
 
-| 想了解 | 看这里 |
+| 文档 | 看这里 |
 |---|---|
+| **维护手册（技术栈/部署/历史 bug/迁移）** | [`MAINTENANCE.md`](MAINTENANCE.md) |
 | 功能与使用方法 | [`goodmorning-alarm/docs/使用说明书.md`](goodmorning-alarm/docs/使用说明书.md) |
 | 版本都改了什么 | [`goodmorning-alarm/CHANGELOG.md`](goodmorning-alarm/CHANGELOG.md) |
 | 架构与模块划分 | [`goodmorning-alarm/docs/ARCHITECTURE.md`](goodmorning-alarm/docs/ARCHITECTURE.md) |
