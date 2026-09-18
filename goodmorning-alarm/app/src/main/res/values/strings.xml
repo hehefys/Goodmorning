@@ -3,23 +3,14 @@
     <string name="app_name">每日早安</string>
 
     <!-- ===== 主页 ===== -->
-    <string name="main_subtitle">用「每日早安」的早安音频叫醒你</string>
     <string name="alarm_time_label">闹钟时间</string>
     <string name="time_picker_to_input">切换为键盘输入</string>
     <string name="time_picker_to_dial">切换为表盘选择</string>
-    <string name="alarm_switch_label">启用闹钟</string>
-    <string name="next_ring_prefix">下次响铃</string>
-    <string name="next_ring_countdown_prefix">距下次响铃</string>
     <string name="test_ring_button">重播测试 · 立即响铃</string>
     <string name="test_ring_dialog_title">重播链路测试</string>
     <string name="test_ring_dialog_text">将按当前设置立即开始一次完整响铃演练：副音频衬托 → 主音频 → 副音频单轮播完自动重播。可在通知栏点「停止」结束。</string>
-    <string name="snooze_active_prefix">稍后提醒中</string>
-    <string name="alarm_disabled_hint">闹钟已关闭，开启后到点将播放早安音频</string>
-    <string name="exact_alarm_not_granted">未授予精确闹钟权限，请前往权限引导开启</string>
     <string name="sync_status_label">最近同步</string>
     <string name="sync_status_never">尚未同步</string>
-    <string name="sync_ok_fmt">成功 · %1$s · %2$d 条可用</string>
-    <string name="sync_fail_fmt">失败 · %1$s · %2$s</string>
     <string name="btn_settings">设置</string>
     <string name="btn_permission_guide">权限引导</string>
     <string name="btn_confirm">确定</string>
@@ -27,7 +18,6 @@
 
     <!-- ===== 主页权限常驻提醒（F5） ===== -->
     <string name="main_perm_banner_notification">未开启通知权限，闹钟响铃时可能无法提醒</string>
-    <string name="main_perm_banner_fullscreen">未开启全屏显示通知，锁屏时可能无法弹出响铃页</string>
     <string name="main_perm_banner_exact_alarm">未授予精确闹钟权限，闹钟可能无法准时响铃</string>
     <string name="main_perm_go_open">去开启</string>
 
@@ -118,20 +108,11 @@
     <string name="usage_s5_q3">更换博主会清空旧缓存并重新下载；「历史博主」列表可一键切回，× 可删除历史条目。</string>
 
     <!-- ===== 响铃页 ===== -->
-    <string name="ringing_today_source">今日早安</string>
-    <string name="ringing_cached_source">最近一期</string>
-    <string name="ringing_fallback_source">默认铃声</string>
-    <string name="ringing_not_updated_tip">今日尚未更新，为你播放最近一期</string>
-    <string name="ringing_fallback_tip">暂无可用音频，已切换系统默认闹钟铃声</string>
     <string name="ringing_publish_date_fmt">发布于 %1$s</string>
-    <string name="ringing_btn_stop">停止</string>
     <string name="ringing_btn_snooze">稍后提醒</string>
     <string name="ringing_btn_pause">暂停</string>
     <string name="ringing_btn_resume">继续播放</string>
-    <string name="ringing_loading">闹钟加载中，请稍候…</string>
-    <string name="ringing_slide_to_stop">滑动停止响铃</string>
     <!-- 响铃页「打开抖音看最新视频」按钮：数据源不可靠时一键拉起抖音直达博主主页（方案 A 兜底入口） -->
-    <string name="ringing_open_douyin">打开抖音看最新视频</string>
 
     <!-- ===== 设置页 ===== -->
     <string name="settings_title">设置</string>
@@ -189,6 +170,4 @@
     <string name="notif_action_stop">停止</string>
 
     <!-- ===== 通用 ===== -->
-    <string name="time_format_hm">HH:mm</string>
-    <string name="unknown_error">未知错误</string>
 </resources>

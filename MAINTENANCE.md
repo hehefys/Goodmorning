@@ -232,8 +232,8 @@ cd D:\AI Coding\Work_Buddy\2026-08-27-18-01-08\goodmorning-alarm
 
 | 项 | 位置 | 说明 | 风险 |
 |---|---|---|---|
-| ✅ `.scratch/` 临时笔记入库 | `goodmorning-alarm/.scratch/`（2 个 md） | 会话记录/真机实测笔记，属工作草稿；git 历史里已有，可从 HEAD 移除 | 无（`git log -- .scratch` 仍可回看） |
-| ✅ 21 条未引用字符串 | `strings.xml`（V1/V2 旧响铃界面遗留：`main_subtitle`、`ringing_slide_to_stop`、`ringing_btn_stop` 等） | 全仓无 `R.string.`/`@string/` 引用，也无 `getIdentifier` 动态取串 | 无 |
+| ✅ ~~`.scratch/` 临时笔记~~ **已清理** | `goodmorning-alarm/.scratch/`（2 个 md） | 2026-09-18 已删除；git 历史可回看（`git log -- goodmorning-alarm/.scratch`） | 无 |
+| ✅ ~~21 条未引用字符串~~ **已清理** | `strings.xml`（V1/V2 旧响铃界面遗留） | 2026-09-18 已删除；删除前全仓 64 个源文件复核零引用、无 `getIdentifier` 动态取串 | 无 |
 | ⚠️ Docker 部署路线（旧架构） | `dyproxy/{Dockerfile,docker-compose.yml,restart.sh}` | 服务端已改「裸 Node + systemd」（setup-linux-vm.sh），容器方案仅剩文档价值；README 已标注「服务器上现已无 dyproxy 容器」 | 若日后想回容器部署则有用；删则建议连 README §对应行一起改 |
 | ⚠️ `island-test/` 实验工程 | 仓库根 | 超级岛渲染验证（392 行），媒体大卡孵化自它；现功能已并入主 App，且**无任何文档引用** | 留作渲染行为参照（HyperOS 版本升级时可复测）；移出仓库则丢这段历史 |
 | ⚠️ 设计文档整体过时 | `docs/{ARCHITECTURE,PRD,DESIGN-V2,QA-REPORT,QA-REPORT-R2,TECH-STACK-AND-LEARNING-PATH}.md` + 2 个 mermaid 图 | 均为 08-27（v1.0 时代）产物：ARCHITECTURE **0 处**提及 dyproxy/frp/看门狗/暂停语义；TECH-STACK 数字停在 6636 行/41 文件/77 例（实际 7780/46/86），未覆盖 playwright、androidx.media、AGPL；QA 报告停留在首轮 | 若定位是「历史决策记录」可原样保留；若当「现状说明」会误导 → 建议在各文件头部加「⚠️ 快照文档，现状见 MAINTENANCE.md」横幅，或重写 ARCHITECTURE |
