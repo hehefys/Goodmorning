@@ -154,6 +154,12 @@ class AlarmService : Service() {
     /** 媒体状态刷新协程：每秒上报播放位置，锁屏进度条由此前进 */
     private var mediaTickerJob: Job? = null
 
+    /**
+     * 暂停超时收尾协程：暂停后 [Constants.PAUSE_TIMEOUT_MS] 内无操作即结束本场。
+     * 详见 [startPauseTimeout]。
+     */
+    private var pauseTimeoutJob: Job? = null
+
     /** 最近一次通知标题/文案（暂停/继续重建通知时复用） */
     private var lastNotifTitle: String? = null
     private var lastNotifText: String? = null
@@ -325,6 +331,7 @@ class AlarmService : Service() {
     override fun onDestroy() {
         stopToneFallback()
         cancelWatchdog()
+        cancelPauseTimeout()
         mediaTickerJob?.cancel()
         serviceScope.cancel()
         if (::player.isInitialized) runCatching { player.release() }
@@ -827,6 +834,39 @@ class AlarmService : Service() {
     }
 
     /**
+     * 启动暂停超时倒计时：暂停后 [Constants.PAUSE_TIMEOUT_MS] 内无任何操作 → 视作本次响铃结束。
+     *
+     * 动因：媒体卡「暂停」只静音、不结束响铃场（`ringingGuard` 仍为 true），
+     * 场一直挂着 = 前台服务 + 响铃通知 + 锁屏媒体卡全部驻留。用户暂停后睡着/出门，
+     * 通知栏会挂一整天，且没有明显入口提示「这一场其实还没结束」。
+     *
+     * 收尾语义与手动「停止」完全一致（复用 [handleStop]）：撤通知、注册明天闹钟、补调度同步。
+     * 暂停态下 [AlarmPlayer.stopWithFadeOut] 会走「未在播 → 立即停」分支，
+     * 不存在渐弱回调不触发导致收尾卡住的风险。
+     */
+    private fun startPauseTimeout() {
+        val gen = sessionSeq
+        pauseTimeoutJob?.cancel()
+        pauseTimeoutJob = serviceScope.launch {
+            delay(Constants.PAUSE_TIMEOUT_MS)
+            // 让位判据：新一场已接管 / 已非暂停 / 已停止 —— 都不该再收尾
+            if (gen != sessionSeq) return@launch
+            if (!ringingGuard.get() || !mediaPaused) return@launch
+            AppLogger.i(
+                TAG,
+                "暂停已超时（${Constants.PAUSE_TIMEOUT_MS / 60_000} 分钟无操作）→ 结束本次响铃"
+            )
+            handleStop()
+        }
+    }
+
+    /** 撤销暂停超时（继续播放 / 本场结束 / 服务销毁时调用） */
+    private fun cancelPauseTimeout() {
+        pauseTimeoutJob?.cancel()
+        pauseTimeoutJob = null
+    }
+
+    /**
      * 暂停/继续（通知按钮、锁屏媒体卡、耳机媒体键的统一入口）。
      * 仅在主音频已起播后有实际意义；衬托期忽略（副音频陪衬不宜单独暂停）。
      */
@@ -835,11 +875,16 @@ class AlarmService : Service() {
         if (mediaPaused) {
             player.resume()
             mediaPaused = false
+            cancelPauseTimeout()
             AppLogger.i(TAG, "媒体卡操作：继续播放")
         } else {
             player.pause()
             mediaPaused = true
-            AppLogger.i(TAG, "媒体卡操作：暂停播放")
+            startPauseTimeout()
+            AppLogger.i(
+                TAG,
+                "媒体卡操作：暂停播放（${Constants.PAUSE_TIMEOUT_MS / 60_000} 分钟无操作将自动收尾）"
+            )
         }
         updateMediaState()
         rebuildRingingNotification()

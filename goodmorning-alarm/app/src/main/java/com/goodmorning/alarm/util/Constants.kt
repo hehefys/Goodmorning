@@ -97,6 +97,19 @@ object Constants {
      */
     const val RING_STEP_TIMEOUT_MS = 1_500L
 
+    /**
+     * 暂停超时自动收尾：媒体卡「暂停」后无任何操作达到此时长，即视作本次响铃结束。
+     *
+     * 为什么需要：暂停只静音、不结束响铃场（[RING_STEP_TIMEOUT_MS] 那条注释里的
+     * 2026-09-17 事故正源于此 —— 暂停场跨夜存活并吞掉后续到点）。场一直挂着意味着
+     * 前台服务 + 响铃通知 + 锁屏媒体卡全部驻留，用户暂停后睡着，通知栏会挂一整天。
+     *
+     * 取 10 分钟：与 [com.goodmorning.alarm.alarm.RingWakeLock] 的兜底超时同量级，
+     * 避免出现「唤醒锁已释放、响铃场还挂着」的中间态（那种状态最耗电也最难排查）。
+     * 暂停本身耗电极低（播放器已 pause），不存在整夜耗电问题。
+     */
+    const val PAUSE_TIMEOUT_MS = 10 * 60_000L
+
     // ===== 第四级兜底：ToneGenerator 蜂鸣（无任何可用铃声 URI 时） =====
     /** ToneGenerator 音量（0-100） */
     const val TONE_VOLUME = 80
