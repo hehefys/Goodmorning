@@ -14,10 +14,10 @@ android {
         applicationId = "com.goodmorning.alarm"
         minSdk = 29
         targetSdk = 35
-        // 版本号规则：versionCode = 主*10000 + 次*100 + 修订（2.2.1 → 20201）
+        // 版本号规则：versionCode = 主*10000 + 次*100 + 修订（2.2.2 → 20202）
         // ⚠️ 改动时须同步 Constants.APP_VERSION（设置页「关于」展示的版本号）。
-        versionCode = 20201
-        versionName = "2.2.1"
+        versionCode = 20202
+        versionName = "2.2.2"
     }
 
     buildTypes {

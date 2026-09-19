@@ -4,6 +4,63 @@
 
 ---
 
+## 2.2.2 — 2026-09-19 · 看门狗改为 Doze 可靠投递 + 修选片竞态双起播
+
+> 依据 `gma-2026-09-19.log` 两份运行日志定位。2.2.1 的看门狗在**设备正常清醒时**有效，
+> 但本轮日志暴露出它在真实使用场景（响铃中设备重新入睡）下形同虚设；
+> 另外发现一处只在「暂停中又到点」才触发的双起播竞态。两者都不改变对外行为语义。
+
+### 修复
+
+**1. 起播看门狗迟到 13 分 48 秒 —— 协程 `delay()` 不唤醒 CPU**（`AlarmScheduler.scheduleWatchdog()`）
+
+现象：09:00 闹钟到点，起播链路正常启动（日志有「起播准备完成」），但铃声实际
+`09:13:48` 才响，**迟到 13 分 48 秒**。同一份日志里 45s 的网络总闸也被拖到同一时刻才执行
+—— 两者的共同点是都挂在 `delay()` 上。
+
+根因：2.2.1 引入的看门狗用协程 `delay(RING_WATCHDOG_MS)` 实现，而 `delay()` 底层是
+Handler 定时，**CPU 睡眠时不唤醒**。到点起播后设备随即重新入睡，定时器被连进程一起冻住，
+只有等到下一次系统唤醒（本例是 13 分 48 秒后）才补跑 —— 兜底比事故本身还晚，等于没有兜底。
+
+修复：看门狗改由 **AlarmManager 主通道**投递。
+- 新增 `AlarmScheduler.scheduleWatchdog(delayMs, gen)`：精确优先
+  `setExactAndAllowWhileIdle`（Doze 下按点送达并唤醒 CPU），无精确权限时降级
+  `setAndAllowWhileIdle`；返回 `false` 表示未取得精确投递，调用方保留协程兜底。
+  刻意**不用 `setAlarmClock`** —— 那会在状态栏挂常驻闹钟图标，而看门狗对外应完全不可见。
+- `ACTION_RING_WATCHDOG` 广播经 `AlarmReceiver` → `AlarmService`，与主闹钟共用
+  `RingWakeLock` 唤醒链；Receiver 只负责唤醒与转交，**全部让位判据由服务裁决**。
+- 协程 `delay` 降级为副通道并保留：设备清醒时它更早更准，且无精确闹钟权限时它是唯一兜底。
+- 两条通道最终都进 `handleWatchdogFired(gen)`，靠 `EXTRA_SESSION_GEN` 场次比对天然幂等，
+  谁先到谁生效，`fallbackEngaged` 保证兜底只发生一次。
+
+**2. 看门狗不得制造「假闹钟」**
+
+看门狗是**起播补救信号**，不是闹钟到点。若服务是被系统为送达该消息而重新拉起
+（`ringingGuard` 为 false，无场在跑），或本场已停止/贪睡，必须干净退出：
+- 场次不匹配 / 本场已结束 → `stopForegroundAndSelf()` 撤前台退出（否则留下撤不掉的前台通知）；
+- 已出声（`mainStarted`）或副音频在播（衬托期属正常，不该判哑）→ 直接让位；
+- 播放器创建失败时不再降级蜂鸣，同样撤前台退出 —— 在没有闹钟的时刻响起就是假闹钟。
+
+**3. 选片竞态致「两次选片、两次起播」**（`AlarmService.selectAndPlay()` / `forceRestartSession()`）
+
+现象：12:36 同一秒内出现两份副音频起播、两次选片、两条「开始播放」日志，声音互相覆盖。
+
+根因：`forceRestartSession()`（测试键打断 / 暂停中又到点）只做了 `sessionSeq++` 让位，
+但**选片链路横跨多个挂起点**（读设置、两级现场同步），旧协程醒来后照样会走到
+`startMainWith()` 起播一次。
+
+修复：双保险。
+- `selectJob` 记录当前选片协程，重开新一场时先 `cancel()` —— 拦在挂起点；
+- `startMainWith()` 前比对 `gen != sessionSeq` 并放弃起播 —— 拦「已越过挂起点」的残余。
+  两条缺一不可：单靠取消拦不住已过挂起点的同步段，单靠比对则旧链路会白跑完整轮 IO。
+
+### 变更
+
+- 版本号 2.2.1 → 2.2.2（`versionCode` 20201 → 20202），
+  `app/build.gradle.kts` 与 `Constants.APP_VERSION` 同步。
+
+---
+
 ## 2.2.1 — 2026-09-18 · 响铃链路四修复（哑响铃 / 划掉不停播 / 主音频不播 / 暂停吞到点）
 
 > 本轮 4 个提交全部集中在响铃链路（`playback/AlarmService.kt` + `util/Constants.kt`）。
