@@ -96,6 +96,62 @@ class AlarmScheduler(private val context: Context) {
         _snoozeUntilMillis.value = null
     }
 
+    /**
+     * 注册起播看门狗（delayMs 毫秒后一次性触发，交给 AlarmReceiver 转服务裁决）。
+     *
+     * 为什么不用协程 delay：CPU 睡眠时 Handler 定时不唤醒（2026-09-19 实测 8s 被拖成 13m46s）。
+     * 这里刻意**不用 setAlarmClock**——那会在状态栏挂一个闹钟图标，而看门狗对外应完全不可见；
+     * 用 allowWhileIdle 系列即可满足「Doze 下按点送达并唤醒 CPU」。
+     *
+     * @return true = 已成功注册精确闹钟；false = 无精确权限或注册失败，调用方应保留协程 delay 兜底
+     */
+    fun scheduleWatchdog(delayMs: Long, gen: Int): Boolean {
+        val manager = alarmManager
+            ?: run {
+                AppLogger.e(TAG, "AlarmManager 不可用，看门狗退回协程延时")
+                return false
+            }
+        val triggerAt = System.currentTimeMillis() + delayMs
+        val pi = watchdogPendingIntent(triggerAt, gen)
+        if (canScheduleExact()) {
+            runCatching {
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            }.onSuccess {
+                AppLogger.i(TAG, "起播看门狗已注册（setExactAndAllowWhileIdle，${delayMs}ms，gen=$gen）")
+                return true
+            }.onFailure { e ->
+                AppLogger.w(TAG, "看门狗 setExactAndAllowWhileIdle 失败，降级", e)
+            }
+        } else {
+            AppLogger.w(TAG, "看门狗缺少精确闹钟权限，降级为非精确（仍保留协程兜底）")
+        }
+        return runCatching {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            AppLogger.w(TAG, "起播看门狗已注册（setAndAllowWhileIdle 非精确，${delayMs}ms，gen=$gen）")
+            false
+        }.onFailure { e -> AppLogger.e(TAG, "看门狗注册失败，退回协程延时", e) }.getOrDefault(false)
+    }
+
+    /** 取消起播看门狗（已出声 / 停止 / 贪睡 / 换场 / 服务销毁时调用，幂等） */
+    fun cancelWatchdog() {
+        alarmManager?.cancel(watchdogPendingIntent(0L, 0))
+    }
+
+    /** 看门狗广播意图：携带场次代号，送达时用于让位判据 */
+    private fun watchdogPendingIntent(triggerAt: Long, gen: Int): PendingIntent {
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            action = Constants.ACTION_RING_WATCHDOG
+            putExtra(Constants.EXTRA_SESSION_GEN, gen)
+            putExtra(Constants.EXTRA_TRIGGER_AT, triggerAt)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            Constants.REQUEST_CODE_WATCHDOG,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     // ---- 内部实现 ----
 
     /**

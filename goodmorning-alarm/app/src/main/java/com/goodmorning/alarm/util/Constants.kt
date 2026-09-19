@@ -9,7 +9,7 @@ object Constants {
     /** 版本号（设置页「关于」展示；未启用 BuildConfig 时使用此常量）
      *  ⚠️ 改动时须同步 `app/build.gradle.kts` 的 versionName / versionCode，
      *     否则系统「应用信息」与设置页会显示不同版本（历史上曾长期不一致）。 */
-    const val APP_VERSION = "2.2.1"
+    const val APP_VERSION = "2.2.2"
 
     // ===== 数据源 =====
     /** 抖音用户「每日早安」的 sec_uid */
@@ -133,6 +133,18 @@ object Constants {
      */
     const val ACTION_NOTIF_DISMISSED = "com.goodmorning.alarm.action.NOTIF_DISMISSED"
 
+    /**
+     * 起播看门狗到点（Doze 可靠版）。
+     *
+     * 为什么看门狗必须有一个**独立的 AlarmManager 闹钟**，而不能只靠协程 `delay()`：
+     * `delay()` 底层是 Handler 定时，**CPU 睡眠时不会唤醒**。
+     * 2026-09-19 实测（gma-2026-09-19.log）：09:00 到点起播后设备重新入睡，
+     * 8s 看门狗与 45s 网络总闸双双被拖到 **13m46s** 才执行，铃声晚了 13 分 48 秒。
+     * AlarmManager 的 allowWhileIdle 系列在 Doze 下仍会按点送达并唤醒 CPU，
+     * 故看门狗改为「闹钟（准点）+ 协程（省权限时兜底）」双保险，两者共用同一套让位判据。
+     */
+    const val ACTION_RING_WATCHDOG = "com.goodmorning.alarm.action.RING_WATCHDOG"
+
     // ===== 通知 =====
     // v2：渠道创建后声音设置不可变；响铃音频由服务经 USAGE_ALARM 播放，
     // 渠道必须静音避免通知音混入闹钟音，故启用新 ID。
@@ -147,6 +159,8 @@ object Constants {
     const val REQUEST_CODE_SNOOZE = 1002
     /** setAlarmClock 的「展示/编辑闹钟」意图（状态栏闹钟图标点击用） */
     const val REQUEST_CODE_ALARM_INFO = 1003
+    /** 起播看门狗的 AlarmManager 闹钟（与每日/贪睡闹钟分开，互不干扰） */
+    const val REQUEST_CODE_WATCHDOG = 1004
 
     // ===== 到点去重（防重复/叠加/延迟重播） =====
     /** 到点意图携带的「计划触发时刻」（epoch ms），用于识别同一场闹钟的重复投递 */
@@ -159,6 +173,11 @@ object Constants {
      * Service 拿当前时间一比（差值仅几十毫秒）就会把自己判成重复而哑火。
      */
     const val EXTRA_DEDUPE_PASSED = "dedupe_passed"
+    /**
+     * 会话代号。看门狗闹钟在「安排时」记下场次，送达时比对：
+     * 与当前场次不符即说明已被新一场/停止接管，看门狗须让位，不得插手。
+     */
+    const val EXTRA_SESSION_GEN = "session_gen"
     /**
      * 计划触发时刻差值小于此值即视为同一场闹钟（ms）。
      * 取 15s：系统对同一场闹钟的重复/延迟投递间隔远小于此，

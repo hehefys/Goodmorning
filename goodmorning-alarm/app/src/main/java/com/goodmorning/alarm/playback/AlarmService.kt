@@ -102,6 +102,13 @@ class AlarmService : Service() {
     private var watchJob: Job? = null
 
     /**
+     * 当前选片/起播链路。旧链路必须在重开新一场时被取消，
+     * 否则两条链路会各自跑到 `startMainWith`，出现「两次选片、两次起播」互相覆盖
+     * （2026-09-19 12:36 实测：同一秒内两条「副音频起播」+ 两条「开始播放」）。
+     */
+    private var selectJob: Job? = null
+
+    /**
      * 最近一次成功读取的设置。读设置超时/失败时退回它，避免整场响铃卡在读设置上。
      * 首次启动无缓存时为 null，调用方据此退回 [Settings] 默认值（宁可参数不完美，也不能没声音）。
      */
@@ -183,9 +190,16 @@ class AlarmService : Service() {
         // 息屏可靠性②：到点去重（主判重在 AlarmReceiver，此处只兜底）。
         // 控制命令不受影响；确属重复到点时先补一次前台调用（Android 8+ 要求
         // startForegroundService 后必须进前台，否则系统会判定启动超时），再安全退出。
-        if (intent.action != Constants.ACTION_STOP && intent.action != Constants.ACTION_SNOOZE &&
-            intent.action != Constants.ACTION_PLAY_PAUSE
-        ) {
+        //
+        // ⚠️ 判重只适用于**真实到点**。控制类命令与看门狗都不携带「计划触发时刻」，
+        // 若参与判重会被 15s 窗口误杀：实测「刚响铃 10s 内划掉通知」会被当成重复到点，
+        // 直接 stopSelf 而不走 handleStop 的收尾登记（明天闹钟不续期、同步不补调度）。
+        val isControl = intent.action == Constants.ACTION_STOP ||
+            intent.action == Constants.ACTION_SNOOZE ||
+            intent.action == Constants.ACTION_PLAY_PAUSE ||
+            intent.action == Constants.ACTION_NOTIF_DISMISSED ||
+            intent.action == Constants.ACTION_RING_WATCHDOG
+        if (!isControl) {
             // 主页测试键强制触发，不参与去重
             val force = intent.getBooleanExtra(Constants.EXTRA_FORCE, false)
             // Receiver 已判过重并带上触发时刻 → 本场身份明确，绝不能再判一次
@@ -217,6 +231,12 @@ class AlarmService : Service() {
             .onFailure { AppLogger.e(TAG, "进入前台失败（通知权限？），继续尝试出声", it) }
         // 播放器创建失败则连主音频都放不了，直接降到最后防线蜂鸣
         runCatching { ensurePlayer() }.onFailure {
+            if (intent.action == Constants.ACTION_RING_WATCHDOG) {
+                // 看门狗只是「起播补救」信号：它不该在无场可救时自己发出蜂鸣（那是假闹钟）
+                AppLogger.w(TAG, "看门狗送达但播放器不可用，无可补救，撤前台退出")
+                stopForegroundAndSelf("看门狗无场可救")
+                return START_NOT_STICKY
+            }
             AppLogger.e(TAG, "播放器创建失败，直接走蜂鸣兜底", it)
             playToneFallback("播放器创建失败: ${it.message ?: it.javaClass.simpleName}")
             return START_NOT_STICKY
@@ -227,6 +247,9 @@ class AlarmService : Service() {
             Constants.ACTION_SNOOZE -> handleSnooze()
             Constants.ACTION_PLAY_PAUSE -> handlePlayPause()
             Constants.ACTION_NOTIF_DISMISSED -> handleNotifDismissed()
+            Constants.ACTION_RING_WATCHDOG -> handleWatchdogFired(
+                intent.getIntExtra(Constants.EXTRA_SESSION_GEN, -1)
+            )
             else -> {
                 if (ringingGuard.compareAndSet(false, true)) {
                     sessionSeq++
@@ -298,23 +321,34 @@ class AlarmService : Service() {
     private fun startRingWatchdog() {
         val gen = sessionSeq
         watchJob?.cancel()
+
+        // 主通道：AlarmManager 精确闹钟（Doze 下由系统唤醒进程，不依赖 CPU 常醒）。
+        //
+        // 动因 —— 2026-09-19 事故：09:00 到点后起播链路正常开始，但设备随即进入休眠，
+        // 看门狗本该 5s 后兜底，实际却拖到 09:13:48 才触发（迟到 13 分 48 秒），
+        // 等于这条兜底完全失效。根因是 `delay()` 依赖 CPU 保持唤醒：Doze/息屏下
+        // 协程定时器被系统连同进程一起冻住，只有下一次被唤醒时才补跑。
+        // AlarmManager.setExactAndAllowWhileIdle 走的正是「闹钟到点」那条系统级唤醒通路，
+        // 与主闹钟同等可靠，这才是看门狗该待的地方。
+        //
+        // 无精确闹钟权限时 scheduleWatchdog 返回 false，此时仅保留协程 delay 这条弱兜底，
+        // 并用日志明确标注「可能迟到」，避免下次排障又误判成看门狗正常。
+        val armed = runCatching { alarmScheduler.scheduleWatchdog(Constants.RING_WATCHDOG_MS, gen) }
+            .onFailure { AppLogger.w(TAG, "看门狗注册 AlarmManager 失败，退回协程延时兜底", it) }
+            .getOrDefault(false)
+        if (!armed) {
+            // 注意：返回 false 不等于「没注册上」——降级路径仍会挂一个非精确闹钟。
+            // 非精确意味着 Doze 下可能被推到维护窗口才送达，故协程 delay 这条通道必须保留。
+            AppLogger.w(TAG, "看门狗未取得精确投递（权限缺失或注册失败），已降级 + 协程延时双兜底")
+        }
+
+        // 副通道：协程 delay。作用有二 ——
+        // ① 设备正常清醒时它比 AlarmManager 更早、更准；
+        // ② 无精确闹钟权限时它是唯一的兜底。
+        // 两条通道最终都进 [handleWatchdogFired]，靠 gen 判据幂等，谁先到谁生效。
         watchJob = serviceScope.launch {
             delay(Constants.RING_WATCHDOG_MS)
-            if (gen != sessionSeq) return@launch                            // 已被新一场接管
-            if (!ringingGuard.get()) return@launch                          // 已停止/贪睡
-            if (mainStarted || fallbackEngaged.get()) return@launch         // 主音频已出声
-            // 副音频在播同样算「已经出声」：衬托期要么由 leadJob 到点起主音频，
-            // 要么由 onAmbientEnded 接管，都不需要看门狗插手
-            if (isAmbientPlaying()) return@launch
-            AppLogger.w(
-                TAG,
-                "起播看门狗触发：${Constants.RING_WATCHDOG_MS}ms 内既无主音频也无副音频，强制兜底"
-            )
-            leadJob?.cancel()
-            leadJob = null
-            if (fallbackEngaged.compareAndSet(false, true)) {
-                playFallback("起播超时（看门狗）")
-            }
+            handleWatchdogFired(gen)
         }
     }
 
@@ -322,10 +356,70 @@ class AlarmService : Service() {
     private fun isAmbientPlaying(): Boolean =
         runCatching { ::player.isInitialized && player.isAmbientPlaying }.getOrDefault(false)
 
-    /** 取消看门狗：停止/贪睡/接管新场/已出声时调用 */
+    /**
+     * 看门狗到点（两条通道共用）：到点后 [Constants.RING_WATCHDOG_MS] 内仍无任何声音则强制兜底。
+     *
+     * 幂等设计：协程版与 AlarmManager 版可能几乎同时送达，谁先到谁生效；
+     * [fallbackEngaged] 保证兜底只发生一次，后到者直接被判据拦下。
+     *
+     * ⚠️ 本函数**只补救已有场**。绝不能自己起一个「假闹钟」——若本场已停止/贪睡，
+     * 或服务是被系统为送达本消息而重新拉起（`ringingGuard` 为 false，无场在跑），
+     * 就必须干净退出，否则用户会在没设闹钟的时刻被叫醒，或留下撤不掉的前台通知。
+     */
+    private fun handleWatchdogFired(gen: Int) {
+        // 场次不匹配：已被新一场接管，或服务是被重新拉起的（此时 sessionSeq 为 0，gen>0）
+        if (gen <= 0 || gen != sessionSeq) {
+            AppLogger.i(TAG, "看门狗送达但场次不匹配（gen=$gen，当前 $sessionSeq），忽略")
+            // 服务可能刚被 AlarmManager 拉起却无场可救 → 必须撤前台，否则通知永久驻留
+            if (!ringingGuard.get()) stopForegroundAndSelf("看门狗场次不匹配")
+            return
+        }
+        if (!ringingGuard.get()) {
+            AppLogger.i(TAG, "看门狗送达但本场已停止/贪睡，忽略")
+            stopForegroundAndSelf("看门狗送达时本场已结束")
+            return
+        }
+        if (mainStarted || fallbackEngaged.get()) {
+            AppLogger.i(TAG, "看门狗送达但主音频已出声（或已兜底），无需补救")
+            return
+        }
+        // 副音频在播同样算「已经出声」：衬托期要么由 leadJob 到点起主音频，
+        // 要么由 onAmbientEnded 接管，都不需要看门狗插手
+        if (isAmbientPlaying()) {
+            AppLogger.i(TAG, "看门狗送达但副音频在播，无需补救")
+            return
+        }
+        AppLogger.w(
+            TAG,
+            "起播看门狗触发：${Constants.RING_WATCHDOG_MS}ms 内既无主音频也无副音频，强制兜底"
+        )
+        leadJob?.cancel()
+        leadJob = null
+        if (fallbackEngaged.compareAndSet(false, true)) {
+            playFallback("起播超时（看门狗）")
+        }
+    }
+
+    /** 取消看门狗：停止/贪睡/接管新场/已出声时调用（两条通道一起撤） */
     private fun cancelWatchdog() {
         watchJob?.cancel()
         watchJob = null
+        // AlarmManager 通道必须显式 cancel，否则到点会白白唤醒一次进程
+        runCatching { alarmScheduler.cancelWatchdog() }
+            .onFailure { AppLogger.w(TAG, "撤销看门狗闹钟失败（下次送达会被场次判据忽略）", it) }
+    }
+
+    /**
+     * 撤前台并停止服务（无场可救的清理路径）。
+     * 与 [finishForeground] 的区别：那个带 gen 让位判据、用于正常收尾；
+     * 这个用于「本来就没有场在跑」，必须无条件撤干净。
+     */
+    private fun stopForegroundAndSelf(reason: String) {
+        AppLogger.i(TAG, "撤前台并停止服务（$reason）")
+        runCatching {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        }.onFailure { AppLogger.w(TAG, "撤前台失败（$reason）", it) }
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -348,7 +442,12 @@ class AlarmService : Service() {
     // ---- 选片与起播 ----
 
     private fun selectAndPlay() {
-        serviceScope.launch {
+        // 上一场可能还在选片途中（readSettingsOrLast / 现场同步都是挂起调用，
+        // Doze 下最长可卡到 RING_RESYNC_TIMEOUT_MS 量级）。先掐断，
+        // 否则它醒来后照样会走到 startMainWith，与新一场重复起播。
+        selectJob?.cancel()
+        val gen = sessionSeq
+        selectJob = serviceScope.launch {
             try {
                 // 贪睡驻留通知清场：新一场响铃开始后不再需要
                 NotificationManagerCompat.from(this@AlarmService)
@@ -404,6 +503,14 @@ class AlarmService : Service() {
                 }
                 if (settings == null) {
                     AppLogger.w(TAG, "读设置超时且无缓存值，按默认参数起播（优先出声）")
+                }
+                // 让位判据（2026-09-19 事故）：选片链路含多次挂起（读设置、两级现场同步），
+                // 期间可能已被 forceRestartSession 开的新一场接管 —— 旧链路一旦继续起播，
+                // 就是两条副音频 + 两次主音频互相覆盖（实测同一秒出现两份起播日志）。
+                // 用协程取消 + 场次比对双保险：取消拦挂起点，比对拦「已过挂起点」的残余。
+                if (gen != sessionSeq) {
+                    AppLogger.i(TAG, "选片链路已被新一场接管（gen=$gen → 当前 $sessionSeq），放弃起播")
+                    return@launch
                 }
                 startMainWith(videos, today, settings ?: Settings())
             } catch (e: CancellationException) {
@@ -901,6 +1008,11 @@ class AlarmService : Service() {
      *   忽略，后续每一次闹钟都会被吞掉 —— 见 2026-09-17 事故）
      *
      * 收尾登记交给新一场结束时的 [handleStop] 统一处理。
+     *
+     * ⚠️ 旧场的**选片协程**也必须一并让位（[selectAndPlay] 内 `selectJob?.cancel()` +
+     * 场次比对）：只 `sessionSeq++` 是不够的，因为选片链路横跨多个挂起点
+     * （读设置、两级现场同步），旧协程醒来后仍会走到 `startMainWith` 起播一次
+     * —— 2026-09-19 12:36 实测到「副音频起播 ×2、开始播放 ×2」的双份日志。
      */
     private fun forceRestartSession(reason: String) {
         AppLogger.i(TAG, "重开新一场（$reason）")
@@ -1204,12 +1316,15 @@ class AlarmService : Service() {
          * @param triggerAt 闹钟的计划触发时刻；非 [Long.MIN_VALUE] 时一同带给服务，
          *                  并置上 [Constants.EXTRA_DEDUPE_PASSED]，
          *                  告诉服务「本场已判过重，别再判一次把自己杀掉」
+         * @param sessionGen 起播看门狗专用：安排看门狗时的场次代号，
+         *                   送达时与服务当前场次比对，不符即让位（≤0 表示不适用）
          */
         fun start(
             context: Context,
             action: String,
             force: Boolean = false,
-            triggerAt: Long = Long.MIN_VALUE
+            triggerAt: Long = Long.MIN_VALUE,
+            sessionGen: Int = -1
         ) {
             val intent = Intent(context, AlarmService::class.java).apply {
                 this.action = action
@@ -1218,6 +1333,7 @@ class AlarmService : Service() {
                     putExtra(Constants.EXTRA_TRIGGER_AT, triggerAt)
                     putExtra(Constants.EXTRA_DEDUPE_PASSED, true)
                 }
+                if (sessionGen > 0) putExtra(Constants.EXTRA_SESSION_GEN, sessionGen)
             }
             ContextCompat.startForegroundService(context, intent)
         }

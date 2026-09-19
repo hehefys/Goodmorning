@@ -19,13 +19,22 @@ import com.goodmorning.alarm.util.Constants
  * 3. 启动前台服务，并把「计划触发时刻」带给服务，同时置
  *    [Constants.EXTRA_DEDUPE_PASSED] 表明本场已判过重——服务据此不再二次判重；
  * 4. 精确闹钟不受 Android 12+ 后台启动前台服务限制，
- *    但厂商 ROM 可能在瞬时状态下拒绝，故失败后用 goAsync 保活并延迟重试一次。
+ *    但厂商 ROM 可能在瞬时状态拒绝，故失败后用 goAsync 保活并延迟重试一次。
+ *
+ * 另承接**起播看门狗**（[Constants.ACTION_RING_WATCHDOG]）：它由 AlarmManager 在到点后
+ * 8s 送达，用于在 CPU 睡眠把协程 delay 拖住时仍能准时兜底出声（见 2026-09-19 事故）。
+ * 它**不是**闹钟到点，因此走独立分支、不参与到点判重。
  */
 class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Constants.ACTION_RING) return
-        val appContext = context.applicationContext
+        when (intent.action) {
+            Constants.ACTION_RING -> handleRing(context.applicationContext, intent)
+            Constants.ACTION_RING_WATCHDOG -> handleWatchdog(context.applicationContext, intent)
+        }
+    }
+
+    private fun handleRing(appContext: Context, intent: Intent) {
         AppLogger.i(TAG, "闹钟到点，启动响铃服务")
 
         // ① 到点去重（主判重点）：同一场闹钟的重复/延迟投递直接丢弃，
@@ -62,6 +71,23 @@ class AlarmReceiver : BroadcastReceiver() {
                 pendingResult.finish()
             }
         }, RETRY_DELAY_MS)
+    }
+
+    /**
+     * 起播看门狗送达：只负责把 CPU 唤醒并把场次代号转给服务，**由服务做全部让位判据**
+     * （是否已出声 / 是否已被新一场接管 / 是否已停止），接收器不自作判断。
+     */
+    private fun handleWatchdog(appContext: Context, intent: Intent) {
+        val gen = intent.getIntExtra(Constants.EXTRA_SESSION_GEN, -1)
+        AppLogger.i(TAG, "起播看门狗闹钟送达（gen=$gen），交服务裁决")
+        // 送达即唤醒 CPU；本把锁由服务 onCreate 接管（同一时刻只保留最新一把）
+        RingWakeLock.acquire(appContext, "watchdog")
+        runCatching {
+            AlarmService.start(appContext, Constants.ACTION_RING_WATCHDOG, sessionGen = gen)
+        }.onFailure {
+            AppLogger.e(TAG, "看门狗启动服务失败，释放锁", it)
+            RingWakeLock.release()
+        }
     }
 
     /** 尝试启动响铃服务；返回是否调用成功（不代表音频已出声） */
